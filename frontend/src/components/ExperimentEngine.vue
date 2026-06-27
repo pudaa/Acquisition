@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="engine-container" ref="container">
     <!-- 左侧工具栏（加大+可滚动） -->
     <div class="engine-sidebar">
@@ -24,6 +24,14 @@
         <button class="sidebar-btn" @click="toggleDelete" :class="{ active: isDeleteMode }" title="删除">
           <span class="sidebar-icon" style="font-size:22px;">🗑</span>
           <span class="sidebar-label">删除</span>
+        </button>
+        <button class="sidebar-btn" @click="showOscilloscope = !showOscilloscope" :class="{ active: showOscilloscope }" title="示波器">
+          <span class="sidebar-icon">
+            <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor">
+              <path d="M3 3v18h18V3H3zm16 16H5V5h14v14zM7 10h2v7H7v-7zm4-3h2v10h-2V7zm4 6h2v4h-2v-4z"/>
+            </svg>
+          </span>
+          <span class="sidebar-label">示波器</span>
         </button>
       </div>
       <!-- 导入/导出（调试用，由 showDebugTools 控制） -->
@@ -60,9 +68,9 @@
       <div class="pin-tooltip-row">电流: <b>{{ pinInfo.current }}mA</b></div>
     </div>
 
-    <!-- 示波器面板 -->
-    <div v-if="showOscilloscope" class="oscilloscope-panel">
-      <div class="osc-header">
+    <!-- 示波器面板（可拖拽） -->
+    <div v-if="showOscilloscope" class="oscilloscope-panel" :style="{ left: oscPanelX + 'px', top: oscPanelY + 'px' }">
+      <div class="osc-header" @mousedown="onOscDragStart">
         <span>示波器</span>
         <select v-model="oscChannel" class="osc-channel-select">
           <option value="">选择节点...</option>
@@ -73,11 +81,6 @@
       <canvas ref="oscCanvas" class="osc-canvas"></canvas>
     </div>
 
-    <!-- 示波器开关按钮 -->
-    <button class="osc-toggle" @click="showOscilloscope = !showOscilloscope" title="示波器">
-      �
-〰
-    </button>
   </div>
 </template>
 
@@ -137,6 +140,15 @@ let resizeObserver = null;
 let oscAnimId = null;
 let oscVoltageBuffer = [];
 let componentRegistry = new ComponentRegistry();
+
+// 示波器面板拖拽
+const oscPanelX = ref(12);
+const oscPanelY = ref(52);
+let oscDragStartX = 0;
+let oscDragStartY = 0;
+let oscPanelStartX = 0;
+let oscPanelStartY = 0;
+let isOscDragging = false;
 
 // 画布平移
 let offsetX = 0;
@@ -930,6 +942,32 @@ function onCanvasClick(e) {
   selectedType.value = null;
 }
 
+// ======== 示波器面板拖拽 ========
+function onOscDragStart(e) {
+  // 点击 select/button 时不拖拽，避免干扰下拉和关闭
+  const tag = e.target.tagName;
+  if (tag === 'SELECT' || tag === 'OPTION' || tag === 'BUTTON') return;
+  isOscDragging = true;
+  oscDragStartX = e.clientX;
+  oscDragStartY = e.clientY;
+  oscPanelStartX = oscPanelX.value;
+  oscPanelStartY = oscPanelY.value;
+  window.addEventListener('mousemove', onOscDragMove);
+  window.addEventListener('mouseup', onOscDragEnd);
+}
+
+function onOscDragMove(e) {
+  if (!isOscDragging) return;
+  oscPanelX.value = Math.max(0, oscPanelStartX + (e.clientX - oscDragStartX));
+  oscPanelY.value = Math.max(0, oscPanelStartY + (e.clientY - oscDragStartY));
+}
+
+function onOscDragEnd() {
+  isOscDragging = false;
+  window.removeEventListener('mousemove', onOscDragMove);
+  window.removeEventListener('mouseup', onOscDragEnd);
+}
+
 // ======== 画布平移（右键拖拽） ========
 function onMouseDown(e) {
   if (e.button === 2) {
@@ -1237,6 +1275,8 @@ onBeforeUnmount(() => {
   }
   window.removeEventListener('mouseup', onMouseUp);
   window.removeEventListener('keydown', onKeyDown);
+  // 拖拽残留清理
+  if (isOscDragging) onOscDragEnd();
 });
 
 </script>
@@ -1438,11 +1478,11 @@ onBeforeUnmount(() => {
   color: #7fdbff;
 }
 
-/* ---- 示波器面板 ---- */
+/* ---- 示波器面板（可拖拽） ---- */
 .oscilloscope-panel {
   position: absolute;
-  right: 12px;
-  bottom: 52px;
+  right: auto;
+  bottom: auto;
   width: 300px;
   height: 200px;
   background: #0d0d1a;
@@ -1463,6 +1503,11 @@ onBeforeUnmount(() => {
   color: #88aacc;
   font-size: 11px;
   font-weight: 600;
+  cursor: grab;
+  user-select: none;
+}
+.osc-header:active {
+  cursor: grabbing;
 }
 .osc-channel-select {
   flex: 1;
@@ -1487,27 +1532,5 @@ onBeforeUnmount(() => {
   width: 100%;
 }
 
-/* ---- 示波器开关按钮 ---- */
-.osc-toggle {
-  position: absolute;
-  right: 12px;
-  bottom: 12px;
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  border: 1px solid #c5d5ea;
-  background: #fff;
-  font-size: 18px;
-  cursor: pointer;
-  z-index: 400;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.1);
-  transition: all 0.15s;
-}
-.osc-toggle:hover {
-  background: #e8f0fe;
-  border-color: #1976d2;
-}
+
 </style>
