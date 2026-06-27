@@ -1,0 +1,170 @@
+{
+  "components": [
+    {
+      "type": "battery",
+      "xGrid": 10,
+      "yGrid": 5,
+      "rotation": 0,
+      "isGuide": true
+    },
+    {
+      "type": "transistor-npn",
+      "xGrid": 9,
+      "yGrid": 7,
+      "rotation": 0,
+      "beta": 100,
+      "isGuide": true
+    },
+    {
+      "type": "ground",
+      "xGrid": 10,
+      "yGrid": 10,
+      "rotation": 0,
+      "isGuide": true
+    },
+    {
+      "type": "transistor-npn",
+      "xGrid": 16,
+      "yGrid": 8,
+      "rotation": 0,
+      "beta": 100,
+      "isGuide": true
+    },
+    {
+      "type": "battery",
+      "xGrid": 17,
+      "yGrid": 5,
+      "rotation": 0,
+      "isGuide": true
+    },
+    {
+      "type": "wire",
+      "xGrid": 10,
+      "yGrid": 5,
+      "x2Grid": 10,
+      "y2Grid": 6,
+      "isGuide": true
+    },
+    {
+      "type": "wire",
+      "xGrid": 17,
+      "yGrid": 5,
+      "x2Grid": 17,
+      "y2Grid": 7,
+      "isGuide": true
+    },
+    {
+      "type": "wire",
+      "xGrid": 10,
+      "yGrid": 8,
+      "x2Grid": 13,
+      "y2Grid": 10,
+      "isGuide": true
+    },
+    {
+      "type": "wire",
+      "xGrid": 13,
+      "yGrid": 10,
+      "x2Grid": 15,
+      "y2Grid": 8,
+      "isGuide": true
+    },
+    {
+      "type": "resistor",
+      "xGrid": 8,
+      "yGrid": 12,
+      "rotation": 90,
+      "value": 100,
+      "isGuide": true
+    },
+    {
+      "type": "wire",
+      "xGrid": 8,
+      "yGrid": 7,
+      "x2Grid": 8,
+      "y2Grid": 11,
+      "isGuide": true
+    },
+    {
+      "type": "bulb",
+      "xGrid": 20,
+      "yGrid": 8,
+      "rotation": 90,
+      "value": 10,
+      "lit": true,
+      "isGuide": true
+    },
+    {
+      "type": "wire",
+      "xGrid": 17,
+      "yGrid": 7,
+      "x2Grid": 20,
+      "y2Grid": 7,
+      "isGuide": true
+    },
+    {
+      "type": "ground",
+      "xGrid": 17,
+      "yGrid": 10,
+      "rotation": 0,
+      "isGuide": true
+    },
+    {
+      "type": "wire",
+      "xGrid": 17,
+      "yGrid": 9,
+      "x2Grid": 17,
+      "y2Grid": 10,
+      "isGuide": true
+    },
+    {
+      "type": "wire",
+      "xGrid": 8,
+      "yGrid": 13,
+      "x2Grid": 13,
+      "y2Grid": 12,
+      "isGuide": true
+    },
+    {
+      "type": "capacitor",
+      "xGrid": 13,
+      "yGrid": 11,
+      "rotation": 90,
+      "value": 1000,
+      "currentVoltage": -0.9030955143447448,
+      "lastUpdate": 1756026642916,
+      "isGuide": true
+    },
+    {
+      "type": "resistor",
+      "xGrid": 10,
+      "yGrid": 9,
+      "rotation": 90,
+      "value": 100,
+      "isGuide": true
+    },
+    {
+      "type": "wire",
+      "xGrid": 20,
+      "yGrid": 9,
+      "x2Grid": 20,
+      "y2Grid": 11,
+      "isGuide": true
+    },
+    {
+      "type": "resistor",
+      "xGrid": 20,
+      "yGrid": 12,
+      "rotation": 90,
+      "value": 100
+    },
+    {
+      "type": "wire",
+      "xGrid": 20,
+      "yGrid": 13,
+      "x2Grid": 13,
+      "y2Grid": 12
+    }
+  ],
+  "version": "1.0"
+}

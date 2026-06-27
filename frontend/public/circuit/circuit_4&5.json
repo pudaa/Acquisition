@@ -1,0 +1,74 @@
+{
+  "components": [
+    {
+      "type": "bulb",
+      "xGrid": 10,
+      "yGrid": 10,
+      "rotation": 90,
+      "value": 10,
+      "lit": false
+    },
+    {
+      "type": "resistor",
+      "xGrid": 10,
+      "yGrid": 13,
+      "rotation": 90,
+      "value": 100
+    },
+    {
+      "type": "ground",
+      "xGrid": 10,
+      "yGrid": 15,
+      "rotation": 0
+    },
+    {
+      "type": "battery",
+      "xGrid": 10,
+      "yGrid": 5,
+      "rotation": 0
+    },
+    {
+      "type": "wire",
+      "xGrid": 13,
+      "yGrid": 8,
+      "x2Grid": 10,
+      "y2Grid": 9
+    },
+    {
+      "type": "wire",
+      "xGrid": 13,
+      "yGrid": 6,
+      "x2Grid": 10,
+      "y2Grid": 5
+    },
+    {
+      "type": "switch",
+      "xGrid": 16,
+      "yGrid": 6,
+      "rotation": 0,
+      "state": "closed"
+    },
+    {
+      "type": "switch",
+      "xGrid": 16,
+      "yGrid": 11,
+      "rotation": 0,
+      "state": "closed"
+    },
+    {
+      "type": "wire",
+      "xGrid": 10,
+      "yGrid": 11,
+      "x2Grid": 10,
+      "y2Grid": 12
+    },
+    {
+      "type": "wire",
+      "xGrid": 10,
+      "yGrid": 14,
+      "x2Grid": 10,
+      "y2Grid": 15
+    }
+  ],
+  "version": "1.0"
+}

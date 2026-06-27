@@ -1,0 +1,7 @@
+**/node_modules/
+**/dist/
+**/coverage/
+Acquisition.zip
+frontend/public/frontend/
+backend/.env
+**/*.pem

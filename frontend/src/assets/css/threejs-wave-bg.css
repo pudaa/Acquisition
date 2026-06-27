@@ -1,0 +1,22 @@
+.experiment-view,
+.content-area {
+    position: relative;
+    overflow: visible;
+    min-height: 0;
+    height: 100%;
+}
+.layout-container,
+.tab-container,
+.experiment-grid,
+.search-bar,
+.loading {
+    position: relative;
+    z-index: 1;
+}
+.wave-bg-canvas {
+    position: absolute;
+    left: 0; top: 0;
+    width: 100%; height: 100%;
+    z-index: 0;
+    pointer-events: none;
+}

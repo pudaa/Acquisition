@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>虚拟电路实验室</title>
+    <link rel="stylesheet" href="/css/circuit-common.css">
+    <script src="/js/circuit-utils.js"></script>
+    <script src="https://unpkg.com/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+    <script src="/js/experiment-communication.js"></script>
+    <script src="/js/circuit-simulate.js"></script>
+</head>
+<body>
+    <!-- 工具栏 -->
+    <div id="toolbar-container"> 
+        <div id="toolbar">
+            <button class="component-btn" data-type="wire"><img src="/button_icons/wire.png">导线</button>
+            <button class="component-btn" data-type="battery"><img src="/button_icons/battery.png">电源</button>
+            <button class="component-btn" data-type="ground"><img src="/button_icons/ground.png">接地</button>
+            <button class="component-btn" data-type="switch"><img src="/button_icons/switch.png">开关</button>
+            <button class="component-btn" data-type="resistor"><img src="/button_icons/resistance.png">电阻</button>
+            <button class="component-btn" data-type="capacitor"><img src="/button_icons/capacitance.png">电容</button>
+            <!-- <button class="component-btn" data-type="electrolytic-capacitor">电解电容</button> -->
+            <button class="component-btn" data-type="bulb"><img src="/button_icons/bulb.png">灯泡</button>
+            <!-- <button class="component-btn" data-type="diode"><img src="/button_icons/diode.png">二极管</button> -->
+            <button class="component-btn" data-type="transistor-npn"><img src="/button_icons/transistor_npn.png">NPN三极管</button>
+            <!-- <button class="component-btn" data-type="transistor-pnp"><img src="/button_icons/transistor_pnp.png">PNP三极管</button> -->
+            <!-- <button class="component-btn" data-type="and-gate"><img src="/button_icons/and-gate.png">与门</button> -->
+            <!-- <button class="component-btn" data-type="or-gate"><img src="/button_icons/or-gate.png">或门</button> -->
+            <!-- <button class="component-btn" data-type="not-gate"><img src="/button_icons/not-gate.png">非门</button> -->
+            <!-- <button class="component-btn" data-type="nand-gate"><img src="/button_icons/nand-gate.png">与非门</button> -->
+            <!-- <button class="component-btn" data-type="nor-gate"><img src="/button_icons/nor-gate.png">或非门</button> -->
+    </div>
+        <button id="delete-btn" class="component-btn">删除</button>
+        <button id="undo-btn" class="component-btn">撤销</button>
+        <button id="show-btn" class="component-btn">切换电流/电压显示</button>
+        <!-- <button id="export-btn" class="component-btn">导出电路</button>   -->
+    <!-- <button id="import-btn" class="component-btn">导入电路</button> -->
+    </div>
+
+    <canvas id="canvas" width="1200" height="800"></canvas>
+
+    <div class="grid-size-control">
+        <label for="gridSizeSlider">网格大小调节：</label>
+        <input type="range" id="gridSizeSlider" min="10" max="50" value="20" title="调整网格大小">
+    </div>
+    <script type="module">
+        import {getComponentPins, getActualPins, findNearestPin, findNearestComponent, HistoryManager} from "/js/circuit-component.js"
+        import {drawComponent, drawWire, drawGrid, drawSmartWire} from "/js/circuit-draw.js"
+        import {exportCircuit, importCircuit} from "/js/circuit-manage.js"
+        import {GoalStatusManager, BehaviorTracker, GoalDetector} from "/js/circuit-goal.js"
+        var comm = new ExperimentComm();
+        
+        // 初始化画布
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        let GRID_SIZE = 40; // 网格大小
+        
+        // 元件对象
+        let components = [];
+        let selectedComponentType = null;
+        let tempComponent = null;
+
+        // 导线连接相关
+        let wireStartPin = null;
+
+        // 鼠标位置
+        let currentMouseX = 0;
+        let currentMouseY = 0; 
+        let lastDrawTime = Date.now(); 
+        let nodeVoltagesHistory = []; 
+
+        let animationFrameId = null;
+        let isDeleteMode = false;
+        
+        let offsetX = 0;
+        let offsetY = 0;
+
+        // 帧循环函数
+        let frameInterval = 33; // 默认30fps (1000/33≈30)
+        let drawTimer = null;
+
+        let showIV = false; // 是否显示电压电流
+        const circuitNodes = new Map(); // 存储电路节点 {id: {connections: Set, voltage: number}}
+
+        // 学生行为捕获以及目标检测
+        const behaviorTracker = new BehaviorTracker();
+        const goalDetector = new GoalDetector();
+
+        // 导入初始电路
+        (async () => {
+            try {
+                components = await importCircuit('/circuit/circuit_2.json');
+                historyManager = new HistoryManager(components);
+            } catch (error) {
+                console.error('加载预设电路失败:', error);
+            }
+        })();
+
+        // 历史记录
+        let historyManager = new HistoryManager(components);
+
+        // 初始化事件监听
+        initEventListeners();
+
+        // 在页面卸载时添加清理
+        window.addEventListener('beforeunload', () => {
+            if(drawTimer) clearInterval(drawTimer);
+        });
+
+        // 侦听按钮选中以及鼠标点击事件和绘制事件
+        function initEventListeners() {
+            // 工具栏按钮点击
+            document.querySelectorAll('.component-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const alreadySelected = btn.classList.contains('selected');
+                    document.querySelectorAll('.component-btn').forEach(b => b.classList.remove('selected'));
+                    if (alreadySelected) {
+                        selectedComponentType = null;
+                    } else {
+                        btn.classList.add('selected');
+                        selectedComponentType = btn.dataset.type || null;
+                    }
+                    isDeleteMode = false;
+                    wireStartPin = null;
+                    if (btn.id === 'delete-btn'){
+                        selectedComponentType = null;
+                        isDeleteMode = !isDeleteMode;
+                        document.getElementById('delete-btn').classList.toggle('selected', isDeleteMode);
+                    }else if (btn.id === 'undo-btn'){
+                        selectedComponentType = null;
+                        components = historyManager.undo();
+                        draw();
+                        document.querySelectorAll('.component-btn').forEach(b => b.classList.remove('selected'));
+                        selectedComponentType = null;
+                    }else if(btn.id === 'show-btn'){
+                        showIV = !showIV; 
+                        draw();
+                        selectedComponentType = null;
+                        document.querySelectorAll('.component-btn').forEach(b => b.classList.remove('selected'));
+                    }else if (btn.id === 'export-btn'){
+                        exportCircuit(components);
+                    } 
+                });
+            });
+            const slider = document.getElementById('gridSizeSlider');
+            
+            // 更新 GRID_SIZE 并重绘电路
+            function updateGridSize(value) {
+                GRID_SIZE = parseInt(value);
+                redrawCircuit();
+            }
+            
+            // 滑块拖动事件
+            slider.addEventListener('input', function() {
+                updateGridSize(this.value);
+            });
+            
+            
+            canvas.addEventListener('wheel', function(e) {
+                e.preventDefault();
+
+                // 根据滚轮方向调整网格大小
+                const delta = e.deltaY > 0 ? -1 : 1;
+                const newValue = parseInt(slider.value) + delta;
+
+                // 确保新值在滑块的有效范围内
+                if (newValue >= parseInt(slider.min) && newValue <= parseInt(slider.max)) {
+                    slider.value = newValue;
+                    updateGridSize(slider.value);
+                }
+            }, { passive: false });
+            
+            setInterval(() => {
+                slider.value = GRID_SIZE;
+            }, 500); // 每500毫秒同步一次
+            
+            // 画布鼠标事件
+            canvas.addEventListener('mousemove', handleMouseMove);
+            canvas.addEventListener('click', handleCanvasClick);
+            canvas.addEventListener('contextmenu', handleRightClick);
+            canvas.addEventListener('mouseleave', handleMouseLeave);
+            window.addEventListener('keydown', function(e) {
+                e.preventDefault();
+                const step = GRID_SIZE; // 每次移动的像素
+                switch(e.key) {
+                    case 'ArrowLeft':
+                        offsetX += step;
+                        draw();
+                        break;
+                    case 'ArrowRight':
+                        offsetX -= step;
+                        draw();
+                        break;
+                    case 'ArrowUp':
+                        offsetY += step;
+                        draw();
+                        break;
+                    case 'ArrowDown':
+                        offsetY -= step;
+                        draw();
+                        break;
+                }
+            });
+            // 添加页面加载后立即绘制
+            window.addEventListener('load', () => {
+                drawGrid(ctx, canvas, GRID_SIZE, offsetX, offsetY);
+                frameLoop() ; // 启动帧循环
+            });
+        }
+        
+        // 鼠标移动处理
+        function handleMouseMove(e) {
+            const rect = canvas.getBoundingClientRect();
+            currentMouseX = e.clientX - rect.left - offsetX;
+            currentMouseY = e.clientY - rect.top - offsetY;
+
+            // 画布边界检测
+            const inCanvas = currentMouseX >= 0 && currentMouseX <= canvas.width && currentMouseY >= 0 && currentMouseY <= canvas.height;
+
+            if (selectedComponentType) { //  && inCanvas
+                // 计算网格对齐位置
+                const xGrid = Math.round(currentMouseX / GRID_SIZE);
+                const yGrid = Math.round(currentMouseY / GRID_SIZE);
+                const existingRotation = tempComponent ? tempComponent.rotation : 0;
+                tempComponent = {
+                    type: selectedComponentType,
+                    xGrid,
+                    yGrid,
+                    rotation: existingRotation
+                };
+            } else {
+                tempComponent = null;
+            }
+            // draw();
+        }
+        // 点击后进行元件放置
+        function handleCanvasClick(e) {
+            if (isDeleteMode) {
+                const component = findNearestComponent(e, components, canvas, GRID_SIZE, offsetX, offsetY);
+                if (component && !component.isGuide) { // 删除元件
+                    historyManager.save(components);
+                    components = components.filter(c => c !== component);
+                    draw();
+                }
+                return;
+            }
+            if (selectedComponentType === 'wire') { // 绘制导线
+                const pin = findNearestPin(e, components, canvas, GRID_SIZE, offsetX, offsetY);
+                // console.log(pin)
+                if (pin) {
+                    // console.log(pin, e.x, e.y)
+                    if (!wireStartPin) {
+                        wireStartPin = {
+                            xGrid: pin.x / GRID_SIZE,
+                            yGrid: pin.y / GRID_SIZE,
+                            x: pin.x, 
+                            y: pin.y,
+                            component: pin.component,
+                            pinIdx: pin.pinIdx
+                        };
+                    } else {
+                        // 检查起始点和结束点是否相同
+                        if (wireStartPin.xGrid !== pin.x / GRID_SIZE || wireStartPin.yGrid !== pin.y / GRID_SIZE) {
+                            historyManager.save(components);
+                            // 统一结构：导线也作为组件
+                            components.push({
+                                type: 'wire',
+                                // 存储为网格坐标
+                                xGrid: wireStartPin.x / GRID_SIZE,
+                                yGrid: wireStartPin.y / GRID_SIZE,
+                                x2Grid: pin.x / GRID_SIZE,
+                                y2Grid: pin.y / GRID_SIZE
+                            });
+                        }
+                        wireStartPin = null;
+                    }
+                    draw();
+                }
+            } else if (selectedComponentType === 'transistor-npn' || selectedComponentType === 'transistor-pnp') {
+                let beta = prompt('请输入三极管放大倍数β', '100');
+                let newComponent = {...tempComponent};
+                newComponent.type = selectedComponentType;
+                newComponent.beta = parseFloat(beta) || 100;
+                historyManager.save(components);
+                components.push(newComponent);
+                tempComponent = null;
+                draw();
+                selectedComponentType = null; // 一次选择后只允许放置一次
+                document.querySelectorAll('.component-btn').forEach(b => b.classList.remove('selected'));
+            } else if (selectedComponentType === 'switch') {
+                let newComponent = {...tempComponent};
+                newComponent.state = 'closed'; // 初始闭合
+                historyManager.save(components);
+                components.push(newComponent);
+                tempComponent = null;
+                draw();
+                selectedComponentType = null; // 一次选择后只允许放置一次
+                document.querySelectorAll('.component-btn').forEach(b => b.classList.remove('selected'));
+            } else if (selectedComponentType) {
+                let newComponent = {...tempComponent};
+                if (selectedComponentType === 'resistor') {
+                    let r = prompt('请输入电阻值(Ω)', '100');
+                    newComponent.value = parseFloat(r) || 100;
+                } else if (selectedComponentType === 'capacitor' || selectedComponentType === 'electrolytic-capacitor') {
+                    let c = prompt('请输入电容值(μF)', '1000');
+                    newComponent.value = parseFloat(c) || 1000;
+                    newComponent.currentVoltage = 0; // 电容初始电压
+                    newComponent.lastUpdate = Date.now();
+                    if (selectedComponentType === 'electrolytic-capacitor') {
+                        newComponent.direction = 1; // 默认方向
+                    }
+                } else if (selectedComponentType === 'bulb') {
+                    let r = prompt('请输入灯泡电阻(Ω)', '10');
+                    newComponent.value = parseFloat(r) || 10;
+                } else if (selectedComponentType === 'diode') {
+                    newComponent.direction = 1; // 默认方向
+                } else if (selectedComponentType === 'and-gate' ||
+                       selectedComponentType === 'or-gate' ||
+                       selectedComponentType === 'not-gate' ||
+                       selectedComponentType === 'nand-gate' ||
+                       selectedComponentType === 'nor-gate') {
+                    let newComponent = {...tempComponent};
+                }
+                historyManager.save(components);
+                components.push(newComponent);
+                tempComponent = null;
+                draw();
+                selectedComponentType = null; // 一次选择后只允许放置一次
+                document.querySelectorAll('.component-btn').forEach(b => b.classList.remove('selected'));
+            }
+        }
+
+        // 鼠标右键实现旋转
+        function handleRightClick(e) {
+            // 实现元件旋转逻辑
+            e.preventDefault();
+            if (tempComponent) {
+                tempComponent.rotation = (tempComponent.rotation + 90) % 360;
+                draw();
+            } else {
+                // 切换开关状态
+                const pin = findNearestPin(e, components, canvas, GRID_SIZE, offsetX, offsetY);
+                if (pin && pin.component && pin.component.type === 'switch') {
+                    pin.component.state = pin.component.state === 'closed' ? 'open' : 'closed';
+                    draw();
+                }
+            }
+        }
+
+        function handleMouseLeave() {
+            tempComponent = null;
+            draw();
+        }
+        
+        
+        function frameLoop() {
+            if(animationFrameId) cancelAnimationFrame(animationFrameId);
+            // 启动定时器
+            drawTimer = setInterval(() => {
+                const startTime = performance.now();
+                draw();
+                const renderTime = performance.now() - startTime;
+                
+                // 动态调整帧间隔避免积压
+                frameInterval = Math.max(16, Math.min(100, frameInterval + (renderTime > 33 ? 1 : -1)));
+            }, frameInterval);
+        }
+
+        // 总绘制函数（核心函数）——负责界面刷新
+        function draw() {
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.clearRect(0, 0, canvas.width, canvas.height); // 清空画布
+            ctx.translate(offsetX, offsetY);
+            drawGrid(ctx, canvas, GRID_SIZE, offsetX, offsetY); // 绘制底层网格
+            ctx.strokeStyle = '#666'; // 设置导线颜色
+            ctx.lineWidth = 3; 
+            components.forEach(comp => { // 绘制导线
+                if (comp.type === 'wire') {
+                    const pins = getActualPins(comp, GRID_SIZE);
+                    drawWire(ctx, GRID_SIZE, pins[0], pins[1]);
+                    // drawSmartWire(ctx, GRID_SIZE, pins[0], pins[1], components);
+                }
+            });
+
+            const {nodes, nodeKeyMap, compIdMap} = window.getAllNodesAndEdges(components, GRID_SIZE, getActualPins); // 获取所有节点和导线
+            const nodeVoltages = window.solveNodeVoltages(components, GRID_SIZE, getActualPins, window); // 求解所有节点电压
+            // console.log("getAllNodesAndEdges和solveNodeVoltages计算结果为：", nodes, nodeKeyMap, compIdMap, nodeVoltages, "当前电路：", components);
+            // ----------------------------------- 获取时间并更新电容大小 -----------------------------------
+            const now = Date.now(); // 获取当前时间
+            const dt = Math.min(now - lastDrawTime, 100) / 1000; // 计算距离上一次调用draw的时间间隔
+            lastDrawTime = now;
+            window.updateCapacitors(components, nodeVoltages, dt, nodes, nodeKeyMap, compIdMap, getActualPins, window.isConnected, GRID_SIZE);
+            // ----------------------------------- 绘制所有元件以及电压情况 -----------------------------------
+            // 收集所有节点的电压信息
+            const nodeVoltageMap = new Map();
+            components.forEach(component => {
+                let pins = getActualPins(component, GRID_SIZE);
+                let idx1 = pins[0] ? compIdMap.get(nodeKeyMap.get(`${pins[0].x},${pins[0].y}`)) : undefined;
+                let idx2 = pins[1] ? compIdMap.get(nodeKeyMap.get(`${pins[1].x},${pins[1].y}`)) : undefined;
+                let idx3 = pins[2] ? compIdMap.get(nodeKeyMap.get(`${pins[2].x},${pins[2].y}`)) : undefined;
+                let v1 = (idx1 !== undefined) ? nodeVoltages[idx1] : 0;
+                let v2 = (idx2 !== undefined) ? nodeVoltages[idx2] : 0;
+                let v3 = (idx3 !== undefined) ? nodeVoltages[idx3] : 0;
+
+                if (pins[0]) {
+                    const key = `${pins[0].x},${pins[0].y}`;
+                    nodeVoltageMap.set(key, v1);
+                }
+                if (pins[1]) {
+                    const key = `${pins[1].x},${pins[1].y}`;
+                    nodeVoltageMap.set(key, v2);
+                }
+                if (pins[2]) {
+                    const key = `${pins[2].x},${pins[2].y}`;
+                    nodeVoltageMap.set(key, v3);
+                }
+            });
+            // console.log("节点电压图：",nodeVoltageMap,"对应的组件：",components);
+            components.forEach(component => {
+                let pins = getActualPins(component, GRID_SIZE);
+                let idx1 = pins[0] ? compIdMap.get(nodeKeyMap.get(`${pins[0].x},${pins[0].y}`)) : undefined;
+                let idx2 = pins[1] ? compIdMap.get(nodeKeyMap.get(`${pins[1].x},${pins[1].y}`)) : undefined;
+                let idx3 = pins[2] ? compIdMap.get(nodeKeyMap.get(`${pins[2].x},${pins[2].y}`)) : undefined;
+                let v1 = (idx1 !== undefined) ? nodeVoltages[idx1] : 0;
+                let v2 = (idx2 !== undefined) ? nodeVoltages[idx2] : 0;
+                let v3 = (idx3 !== undefined) ? nodeVoltages[idx3] : 0;
+                let I = 0, U = 0, lit = false;
+
+                if (component.type === 'resistor' || component.type === 'bulb') {
+                    U = Math.abs(v1 - v2);
+                    let R = Math.max(component.value || 1, 1e-6);
+                    I = U / R;
+                    if (component.type === 'bulb' && I >= 0.01) lit = true;
+                } else if (component.type === 'diode') {
+                    let dir = component.direction || 1;
+                    let anodeV = dir === 1 ? v1 : v2;
+                    let cathodeV = dir === 1 ? v2 : v1;
+                    U = anodeV - cathodeV;
+                    let forward = U > 0.7;
+                    I = forward ? (U - 0.7) / 0.7 : 0;
+                } else if (component.type === 'capacitor') {
+                    U = Math.abs(v1 - v2);
+                    I = 0;
+                } else if (component.type === 'transistor-npn') {
+                    let vB = v1, vC = v2, vE = v3;
+                    if ((vB - vE) > 0.7 && vC > vE) {
+                        I = (vC - vE) / (component.beta || 100);
+                    } else {
+                        I = 0;
+                    }
+                } else if (component.type === 'transistor-pnp') {
+                    let vB = v1, vC = v2, vE = v3;
+                    if ((vE - vB) > 0.7 && vE > vC) {
+                        I = (vE - vC) / (component.beta || 100);
+                    } else {
+                        I = 0;
+                    }
+                }
+
+                if (component.type === 'bulb') {
+                    component.lit = lit;
+                    drawComponent(ctx, component, GRID_SIZE, getComponentPins, {lit});
+                } else {
+                    drawComponent(ctx, component, GRID_SIZE, getComponentPins);
+                }
+            });
+
+            // 绘制各个节点的电压
+            if (showIV) {
+                ctx.save();
+                ctx.font = '12px Arial';
+                ctx.fillStyle = '#008800';
+                nodeVoltageMap.forEach((voltage, key) => {
+                    const [x, y] = key.split(',').map(Number);
+                    let showV = isNaN(voltage) ? '0.00' : voltage.toFixed(2);
+                    ctx.fillText(`V=${showV}V`, x + 10, y - 10);
+                });
+                ctx.restore();
+            }
+            // ----------------------------------- 绘制临时组件 -----------------------------------
+            if (tempComponent) drawComponent(ctx, tempComponent, GRID_SIZE, getComponentPins);
+            if (wireStartPin) {
+                ctx.setLineDash([5, 5]);
+                drawWire(ctx, GRID_SIZE, wireStartPin, {x: currentMouseX, y: currentMouseY});
+                // drawSmartWire(ctx, GRID_SIZE, wireStartPin, {x: currentMouseX, y: currentMouseY}, components);
+                ctx.setLineDash([]);
+            }
+            // ----------------------------------- 记录灯泡的电压快照并检查目标完成情况 -----------------------------------
+            const voltageSnapshot = {};
+            components.forEach(comp => {
+                if (comp.type === 'bulb') {
+                    const pins = getActualPins(comp, GRID_SIZE);
+                    let idx1 = compIdMap.get(nodeKeyMap.get(`${pins[0].x},${pins[0].y}`));
+                    let idx2 = compIdMap.get(nodeKeyMap.get(`${pins[1].x},${pins[1].y}`));
+                    let v1 = (idx1 !== undefined) ? nodeVoltages[idx1] : 0;
+                    let v2 = (idx2 !== undefined) ? nodeVoltages[idx2] : 0;
+                    const key = `${pins[0].x},${pins[0].y}-${pins[1].x},${pins[1].y}`;
+                    voltageSnapshot[key] = v1 - v2;
+                }
+            });
+            nodeVoltagesHistory.push(voltageSnapshot);
+            if (nodeVoltagesHistory.length > 50) nodeVoltagesHistory.shift();
+            // 记录行为并检查目标
+            behaviorTracker.monitor(components);
+            goalDetector.updateComponentStats(components, nodeVoltagesHistory, GRID_SIZE);
+
+        }
+        
+        // 重绘电路
+        function redrawCircuit() {
+            const savedTempComponent = tempComponent;
+            const savedWireStartPin = wireStartPin;
+
+            components = components.map(comp => {
+                if (comp.type === 'wire') return comp;
+
+                const pins = getComponentPins(GRID_SIZE)[comp.type];
+                if (!pins || pins.length === 0) return comp;
+
+                const basePin = pins[0];
+                const offsetX = Math.round((comp.xGrid + basePin.x / GRID_SIZE));
+                const offsetY = Math.round((comp.yGrid + basePin.y / GRID_SIZE));
+
+                comp.xGrid = offsetX - basePin.x / GRID_SIZE;
+                comp.yGrid = offsetY - basePin.y / GRID_SIZE;
+
+                return comp;
+            });
+
+            tempComponent = savedTempComponent;
+            wireStartPin = savedWireStartPin;
+            draw();
+        }
+
+        // 监听父窗口消息，实验完成时截图canvas
+        comm.addMessageHandler(function(event) {
+            // 验证消息来源
+            if (event.origin !== window.parent.location.origin) {
+                console.warn('跨域消息被忽略:', event.origin);
+                return true; // 表示消息已处理（即使被忽略）
+            }
+
+            // 确认消息类型
+            if (event.data && event.data.type === 'EXPERIMENT_COMPLETE') {
+                console.log('接收到 EXPERIMENT_COMPLETE 消息');
+                if (canvas) {
+                    const image = canvas.toDataURL('image/png');
+                    comm.sendScreenshot(image);
+                    console.log('截图已通过 comm 发送');
+                } else {
+                    console.warn('canvas 未定义，无法生成截图');
+                }
+                return true; // 表示消息已处理
+            } 
+            // 处理元件显示配置消息
+            else if (event.data && event.data.type === 'UPDATE_COMPONENTS') {
+                console.log('接收到 UPDATE_COMPONENTS 消息');
+                if (event.data.components) {
+                    updateAvailableComponents(event.data.components);
+                }
+                return true; // 表示消息已处理
+            }
+
+            else if (event.data && event.data.type === 'UPLOAD_USER_LOG'){
+                console.log('接收到 UPLOAD_USER_LOG 消息');
+                comm.sendUserLog(behaviorTracker.getBehaviorLog());
+                return true;
+            }
+            
+            // 返回 false 表示消息未被处理，将继续传递给其他处理器
+            return false;
+        });
+    </script>
+</body>
+</html>
