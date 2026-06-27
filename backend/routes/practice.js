@@ -2,6 +2,12 @@ import express from 'express';
 import { calculateProbabilities, selectDifficulty, updateMasteryScore } from '../utils/practiceAlgorithm.js';
 import { db } from '../config/db.js';
 import auth from '../middleware/auth.js';
+import OpenAI from 'openai';
+
+const openai = new OpenAI({
+  baseURL: 'https://api.deepseek.com',
+  apiKey: process.env.DEEPSEEK_API_KEY || '',
+});
 
 const router = express.Router();
 
@@ -51,15 +57,17 @@ router.post('/next-question', auth, async (req, res) => {
 // 添加一个 flag 用于控制是否调用错题解析 API
 const ENABLE_ANALYSIS_GENERATION = false; // 默认关闭
 
-// 调用错题解析 API 的函数
+// 调用 AI 生成错题解析
 async function generateQuestionAnalysis(question, userAnswer, correctAnswer) {
     if (!ENABLE_ANALYSIS_GENERATION) {
-        return null; // 如果 flag 为 false，直接返回 null
+        return null;
+    }
+
+    if (!process.env.DEEPSEEK_API_KEY) {
+        return null;
     }
 
     try {
-        const cozeAPI = new CozeAPI();
-
         const prompt = `
 请为以下错题生成解析：
 题目：${question.title}
@@ -76,8 +84,13 @@ async function generateQuestionAnalysis(question, userAnswer, correctAnswer) {
 
 解析内容：`;
 
-        const result = await cozeAPI.questionService(prompt);
-        return result.answer || '解析生成失败';
+        const completion = await openai.chat.completions.create({
+            model: 'deepseek-chat',
+            messages: [{ role: 'user', content: prompt }],
+            temperature: 0.7,
+            max_tokens: 1024,
+        });
+        return completion.choices[0]?.message?.content || '解析生成失败';
     } catch (error) {
         console.error('生成错题解析失败:', error);
         return null;

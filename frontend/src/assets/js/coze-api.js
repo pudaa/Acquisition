@@ -1,8 +1,11 @@
+// 已废弃 - AI 调用已迁移到后端 /api/ai/chat
+// 保留此文件仅作为归档参考
 class CozeAPI {
     constructor() {
-        this.apiKey = 'pat_ChDsIEWgxLuNIorebjYIYcdfVvf5pzqZFNVcdaWgDNJdtb52CqKQSmmzoRg8wQQh';
-        this.botId = '7531258295756472372';
-        this.baseUrl = 'https://api.coze.cn/v3/chat';
+        console.warn('[CozeAPI] 已废弃，请使用后端 /api/ai/chat 接口');
+        this.apiKey = '';
+        this.botId = '';
+        this.baseUrl = '';
     }
 
     async processQuestionAnswer(responseData) {

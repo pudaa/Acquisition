@@ -8,6 +8,7 @@ import teacherRouter from './routes/teacher.js';
 import discussionRouter from './routes/discussion.js';
 import practice from './routes/practice.js';
 import classRouter from './routes/class.js';
+import aiRouter from './routes/ai.js';
 dotenv.config();
 
 const app = express();
@@ -25,7 +26,8 @@ app.use('/api/teacher', teacherRouter);
 app.use('/api/discussion', discussionRouter);
 app.use('/api/practice', practice);
 app.use('/api/class', classRouter);
-app.use('/api/correction-notebook', practice); 
+app.use('/api/correction-notebook', practice);
+app.use('/api/ai', aiRouter); 
 // 启动服务器
 const PORT = process.env.PORT || 5550;
 const server = app.listen(PORT, "0.0.0.0", () => {

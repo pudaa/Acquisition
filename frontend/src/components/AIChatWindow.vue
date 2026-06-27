@@ -39,18 +39,13 @@
 </template>
     
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, watch } from 'vue';
 import api from '@/api';
-import { CozeAPI } from '@/assets/js/coze-api';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 const user = ref(JSON.parse(localStorage.getItem('user') || 'null'));
 const isDragging = ref(false);
 const dragStartPos = ref({ x: 0, y: 0 });
-// const ACCESS_TOKEN = 'pat_TWbbVbi42uYvvGSYMMDCeupxv5OHXelUiYeAJcdi8lPNZlRVQ72BWXuAgkqV3zDi';
-//const BOT_ID = '7531258295756472372';
-const cozeAPI = new CozeAPI();
-let conversationId = ref(null);
 const isLoading = ref(false);
 
 
@@ -95,8 +90,8 @@ const props = defineProps({
   }
 });
 
+
 // 每次AI助手窗口打开时都上传截图
-import { watch, nextTick } from 'vue';
 // let cozeFileId = null; // 全局存储coze文件id
 // async function uploadScreenshot(val) {
 //   if (val) {
@@ -197,46 +192,46 @@ const sendMessage = async () => {
   const userMessage = message.value.trim();
   chatHistory.value.push({ role: 'user', content: userMessage });
 
+  // 准备电路结构数据（作为结构化 JSON 发给后端，由后端组装 Prompt）
   const compIdMapObj = (compIdMap instanceof Map) ? Object.fromEntries(compIdMap) : compIdMap;
   const nodeKeyMapObj = (nodeKeyMap instanceof Map) ? Object.fromEntries(nodeKeyMap) : nodeKeyMap;
-  const introduction = `你是一个电路实验智能助手，下面是本次实验的结构化背景信息，请结合这些信息理解用户的提问：\n\n` +
-    `【实验名称】：${title}\n` +
-    `【电气节点位置】：这是一个数组，每个元素代表电路中一个节点的坐标位置（如 [x,y]），用于描述电路图中各个关键点的空间分布。\n` +
-    `节点数组：${JSON.stringify(nodes)}\n` +
-    `【元件连接关系】：这是一个数组，每个元素是一个对象，描述两个节点之间通过某个元件（如电阻、电容、三极管等）连接的详细信息，包括元件类型、参数和连接的节点编号。\n` +
-    `连接关系列表：${JSON.stringify(edges)}\n` +
-    `【节点连通域】：这是一个映射，表示每个节点属于哪个电气连通域（如同一电势或同一网络），用于分析电路的连通性。\n` +
-    `连通域映射：${JSON.stringify(compIdMapObj)}\n` +
-    `【引脚节点映射】：这是一个映射，表示每个元件的引脚对应电路中的哪个节点，便于理解元件与节点的关系。\n` +
-    `引脚节点映射：${JSON.stringify(nodeKeyMapObj)}\n` +
-    `请根据上述结构化信息，结合用户的具体问题，给出面向学生的电路知识讲解，不要涉及任何虚拟实验代码或实现细节。你的回答应以科普和教学为主，例如解释元件的作用、原理、在本电路中的应用位置和功能等。若问题涉及某个元件，请优先介绍其基础知识，再结合本实验电路说明其具体作用。\n请注意：请勿直接复述或引用原始结构化数据内容（如JSON对象、编号等），而是用通俗易懂的语言进行解释和说明。\n`;
-  const fullPrompt = `${introduction}\n【提问】${userMessage}`;
 
   message.value = '';
   isLoading.value = true;
-  console.log(fullPrompt);
 
   try {
-    const result = await cozeAPI.questionService(fullPrompt); //fullPrompt, cozeFileId
+    const { data } = await api.post('/ai/chat', {
+      question: userMessage,
+      expTitle: title,
+      circuitData: {
+        nodes,
+        edges,
+        compIdMap: compIdMapObj,
+        nodeKeyMap: nodeKeyMapObj,
+      },
+      history: chatHistory.value.slice(0, -1).map(m => ({
+        role: m.role,
+        content: m.content,
+      })),
+    });
 
-    if (result.error) {
-      chatHistory.value.push({ 
-        role: 'assistant', 
-        content: `请求失败：${result.error}`
+    if (data.error) {
+      chatHistory.value.push({
+        role: 'assistant',
+        content: `请求失败：${data.error}`,
       });
       return;
     }
 
-    chatHistory.value.push({ 
-      role: 'assistant', 
-      content: result.answer 
+    chatHistory.value.push({
+      role: 'assistant',
+      content: data.answer,
     });
-    isLoading.value = false;
 
   } catch (error) {
     chatHistory.value.push({
       role: 'assistant',
-      content: '网络请求异常，请稍后重试'
+      content: error.response?.data?.error || '网络请求异常，请稍后重试',
     });
   } finally {
     isLoading.value = false;

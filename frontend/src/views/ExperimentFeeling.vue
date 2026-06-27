@@ -33,7 +33,7 @@
 
 <script>
 import ExperimentReport from '@/assets/js/experiment-report.js';
-import { CozeAPI } from '@/assets/js/coze-api'; // 引入 CozeAPI
+import api from '../api';
 
 export default {
   data() {
@@ -49,23 +49,19 @@ export default {
   },
   methods: {
     async handleIframeMessage(event) {
-      // 调用 AI 分析学生行为数据
+      // 调用后端 AI 接口分析学生行为数据
       const behaviorlogs = this.$route.query.behaviorlogs;
-      const cozeAPI = new CozeAPI();
-      const experimentInfo = `
-      实验名称：${this.$route.query.expTitle}
-      实验目标：${this.$route.query.goals}
-      `;
-      const question = `以下是学生的行为数据，请分析学生的实验表现并给出反馈：\n实验信息：${experimentInfo}\n行为数据：${behaviorlogs}`;
+      const question = `以下是学生的行为数据，请分析学生的实验表现并给出反馈：\n实验信息：${this.$route.query.expTitle}\n实验目标：${this.$route.query.goals}\n行为数据：${behaviorlogs}`;
       console.log('AI 分析问题:', question);
 
       try {
-        const AnalysisResult = await cozeAPI.questionService(question);
-        console.log('AI 分析结果:', AnalysisResult.answer);
-
-        // 将分析结果存储到组件的 data 中
-        this.analysisResult = AnalysisResult.answer || 'AI 分析失败，请稍后重试。';
-        console.log('this.analysisResult', this.analysisResult);
+        const { data } = await api.post('/ai/chat', {
+          question,
+          expTitle: this.$route.query.expTitle,
+          circuitData: null,
+          history: [],
+        });
+        this.analysisResult = data.answer || 'AI 分析失败，请稍后重试。';
       } catch (error) {
         console.error('AI 分析失败:', error);
         this.analysisResult = 'AI 分析失败，请稍后重试。';
