@@ -1,5 +1,4 @@
 <template>
-
     <div class="experiment-learning">
         <div position="relative">
             <div id="guide-container" :style="{ display: showGuide ? 'none':'block'}">
@@ -22,35 +21,30 @@
             <div class="experiment-title">
                 <span>{{ experiment_title }}</span>
             </div>
-            <!-- 问号按钮 -->
-            <button class="help-button" @click="toggleGuide">
-                ?
-            </button>
+            <button class="help-button" @click="toggleGuide">?</button>
         </div>
 
         <div class="learning-img">
-            <img 
-                src="/images/experiment2.jpg" 
-                alt="实验背景"
-                loading="lazy"
+            <img src="/images/experiment2.jpg" alt="实验背景" loading="lazy" />
+        </div>
+
+        <!-- 替换 iframe 为 ExperimentEngine -->
+        <div class="engine-wrapper" v-if="experimentConfig">
+            <ExperimentEngine
+                ref="engineRef"
+                :config="experimentConfig"
+                show-debug-tools
+                @goal-achieved="onGoalAchieved"
+                @progress-update="onProgressUpdate"
+                @engine-ready="onEngineReady"
+                @circuit-info="onCircuitInfo"
             />
         </div>
 
-
-        <div class="iframe-container">
-            <iframe 
-                ref="expIframe"
-                :src="experimentContentUrl" 
-                class="experiment-iframe"
-                allowfullscreen
-                @load="onIframeLoad"
-            ></iframe>
-        </div>
-        
         <div v-if="loading" class="loading">
             <div class="loading-content">实验加载中...</div>
         </div>
-        
+
         <div class="goal-panel">
             <div class="goal-panel-label">学习目标</div>
             <div class="goal-title">学习目标</div>
@@ -116,357 +110,305 @@
     </div>
 </template>
 
-<script>
-import api from '@/api';
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
+<script setup>
+import { ref, onMounted, onUnmounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import api from '@/api';
 import ExperimentReport from '@/assets/js/experiment-report.js';
-import AIChatWindow from '@/components/AIChatWindow.vue'; 
+import AIChatWindow from '@/components/AIChatWindow.vue';
 import PracticePanel from '../components/PracticePanel.vue';
-import ExperimentIntroductionPanel from '../components/ExperimentIntroductionPanel.vue'; 
+import ExperimentIntroductionPanel from '../components/ExperimentIntroductionPanel.vue';
+import ExperimentEngine from '../components/ExperimentEngine.vue';
 
+const engineRef = ref(null);
+const route = useRoute();
+const router = useRouter();
 
-export default {
-    // 在ExperimentLearningView.vue中添加
-    onGuideLoad() {
-        // console.log('引导动画加载完成');
-        // 检查iframe内容
-        const iframe = document.getElementById('guide-iframe');
-        // console.log('iframe内容:', iframe.contentDocument);
-    },
-    data() {
-        return {
-            experiment_title: '',
-            experimentContentUrl: '',
-            loading: true,
-            currentProgress: 0,
-            operationData: [],
-            showCompleteDialog: false,
-            showDownloadDialog: false,
-            showPractice:false,
-            expId: this.$route.query.expId,
-            startTime: null, // 实验开始时间
-            goals: [
-                { id: 'oscillator', title: '完成多谐振荡器的搭建', done: false, action: 'GOAL_OSCILLATOR', weight: 3, finishTime: null, duration: null },
-                { id: 'bulb', title: '成功让灯泡发光', done: false, action: 'GOAL_BULB_LIT', weight: 1, finishTime: null, duration: null },
-                { id: 'resistor', title: '使用不少于4个电阻', done: false, action: 'GOAL_RESISTOR_4', weight: 1, finishTime: null, duration: null },
-            ],
-            dragging: false,
-            startX: 0,
-            startY: 0,
-            currentX: 0,
-            currentY: 0,
-            isLocked: false,
-            showChatWindow: false,
-            showIntroPanel: true, // 控制简介弹窗显示
-            iframeData: null,
-            showGuide: true, // 控制引导动画显示
-            aiScreenshotUrl: null, // AI助手截图
-            behaviorlogs: null, // 用于存储 AI 分析结果
+// ======== 响应式状态 ========
+const experiment_title = ref('');
+const experimentConfig = ref(null);
+const loading = ref(true);
+const currentProgress = ref(0);
+const operationData = ref([]);
+const showCompleteDialog = ref(false);
+const showDownloadDialog = ref(false);
+const showPractice = ref(false);
+const startTime = ref(null);
+const goals = ref([]);
+const showChatWindow = ref(false);
+const showIntroPanel = ref(true);
+const showGuide = ref(true);
+const aiScreenshotUrl = ref(null);
+const iframeData = ref(null);
+const behaviorlogs = ref(null);
+const screenshotUrl = ref('');
+const expId = route.query.expId;
+
+// ======== 生命周期 ========
+onMounted(() => {
+    startTime.value = new Date().toISOString();
+    loadExperimentConfig(expId);
+});
+
+// 引导框加载
+function onGuideLoad() {
+    const iframe = document.getElementById('guide-iframe');
+}
+
+// ======== 实验配置加载 ========
+async function loadExperimentConfig(id) {
+    try {
+        const { data } = await api.get(`/experiments/${id}/config`);
+        if (data.data?.engineMode && data.data?.config) {
+            experimentConfig.value = data.data.config;
+        } else {
+            console.warn('实验没有引擎配置，请先运行 seed 脚本');
+            experimentConfig.value = null;
         }
-    },
-    components: {
-        AIChatWindow,
-        PracticePanel,
-        ExperimentIntroductionPanel
-    },
-    created() {
-        const { expId } = this.$route.query;
-        this.experimentContentUrl = `/experiments/${expId}/index.html`;
-        this.startTime = new Date().toISOString();
-        this.operationData = [];
-        this.fetchExperimentGoals(expId);
-
-        window.addEventListener('message', this.handleIframeMessage);
-    },
-    beforeUnmount() {
-        window.removeEventListener('message', this.handleIframeMessage);
-    },
-    methods: {
-        
-        async goToExperimentFeeling() {
-            // 发送请求让子页面上传用户日志
-            await new Promise((resolve) => {
-                const iframe = this.$refs.expIframe;
-                if (iframe && iframe.contentWindow) {
-                    // 监听一次日志返回
-                    const onUserLog = (event) => {
-                        if (!event.origin.startsWith(window.location.origin)) return;
-                        if (event.data.type === 'UPLOAD_USER_LOG') {
-                            // 打印日志内容
-                            // console.log('收到子页面log:', event.data.log);
-                            window.removeEventListener('message', onUserLog);
-                            this.behaviorlogs = event.data.log; // 保存日志数据
-                            resolve();
-                        }
-                    };
-                    window.addEventListener('message', onUserLog);
-                    // 发送日志请求
-                    iframe.contentWindow.postMessage({ type: 'UPLOAD_USER_LOG' }, window.location.origin);
-                    // 超时兜底，防止子页面无响应
-                    setTimeout(() => {
-                        window.removeEventListener('message', onUserLog);
-                        resolve();
-                    }, 1000);
-                } else {
-                    resolve();
-                }
-            });
-            this.$router.push({
-                name: 'ExperimentFeeling',
-                query: {
-                    expId: this.$route.query.expId,
-                    expTitle: this.experiment_title,
-                    goals: JSON.stringify(this.goals),
-                    operations: JSON.stringify(this.operationData),
-                    progress: this.currentProgress,
-                    startTime: this.startTime,
-                    endTime: new Date().toISOString(),
-                    practiceScore: localStorage.getItem(`practice_score_${this.$route.query.expId}`) || 0,
-                    screenshotUrl: this.screenshotUrl || '',
-                    behaviorlogs: JSON.stringify(this.behaviorlogs),
-                    
-                },
-            });
-        },
-
-        // AI助手按钮点击，先请求截图再显示窗口
-  
-        handleAIAssistantClick() {
-            // 发送截图请求
-            const iframe = this.$refs.expIframe;
-            if (iframe && iframe.contentWindow) {
-                // 监听一次截图返回
-                const onScreenshot = (event) => {
-                    if (!event.origin.startsWith(window.location.origin)) return;
-                    if (event.data.type === 'EXPERIMENT_SCREENSHOT' && event.data.image) {
-                        this.aiScreenshotUrl = event.data.image;
-                        window.removeEventListener('message', onScreenshot);
-                        this.showChatWindow = true;
-                    }
-                };
-                window.addEventListener('message', onScreenshot);
-                // 发送截图请求
-                iframe.contentWindow.postMessage({ type: 'EXPERIMENT_COMPLETE' }, window.location.origin);
-            } else {
-                // iframe未加载，直接显示AI助手
-                this.showChatWindow = true;
-            }
-        },
-    
-
-        // 切换引导动画显示状态
-        toggleGuide() {
-            this.showGuide = !this.showGuide; // 切换显示状态
-        },
-        // 隐藏引导动画
-        hideGuide() {
-            this.showGuide = !this.showGuide; // 隐藏 iframe
-        },
-        onIframeLoad() {
-            this.loading = false;
-            const iframe = this.$refs.expIframe;
-            try {
-                if (!iframe.contentWindow.document.getElementById('trail-effect-script')) {
-                    const script = iframe.contentWindow.document.createElement('script');
-                    script.id = 'trail-effect-script';
-                    script.type = 'text/javascript';
-                    script.src = '/js/trail-effect.js';
-                    script.onload = () => {
-                        if (iframe.contentWindow.TrailEffect) {
-                            iframe.contentWindow.trailEffect = new iframe.contentWindow.TrailEffect();
-                        }
-                    };
-                    iframe.contentWindow.document.body.appendChild(script);
-                } else {
-                    if (iframe.contentWindow.TrailEffect) {
-                        iframe.contentWindow.trailEffect = new iframe.contentWindow.TrailEffect();
-                    }
-                }
-            } catch (e) {
-                // console.warn('拖尾效果注入失败:', e);
-            }
-        },
-        // 统一消息处理方法
-        handleIframeMessage(event) {
-            
-            // 验证消息来源
-            if (!event.origin.startsWith(window.location.origin)) return;
-            // 接收canvas截图
-            if (event.data.type === 'EXPERIMENT_SCREENSHOT' && event.data.image) {
-                // console.log('接收到截图:', event.data.image);
-                this.screenshotUrl = event.data.image;
-                return;
-            }
-            if (event.data.type === 'UPLOAD_USER_LOG') {
-                //console.log('学生行为记录:',event.data.log);
-                return;
-            }
-
-            if (event.data.type === 'CLOSE_GUIDE') {
-                // console.log('关闭引导动画');
-                this.showGuide = false;
-                this.hideGuide();
-                return;
-            }
-
-            if (event.data.type === 'CIRCUIT_INFO') {
-                this.iframeData = event.data;
-                //console.log('接收到电路信息:', event.data);
-            }
-            switch (event.data.type) {
-                case 'PROGRESS_UPDATE': // 更新实验进度
-                    // if (Array.isArray(event.data.doneGoals)) {
-                    //     this.goals.forEach(goal => {
-                    //         if (event.data.doneGoals.includes(goal.id)) {
-                    //             this.setGoalDone(goal.id, false); // 不重复保存进度
-                    //         }
-                    //     });
-                    // }
-                    // 动态按权重计算进度
-                    this.currentProgress = this.calcProgress();
-                    this.saveLearningProgress();
-                    break;
-                case 'OPERATION_RECORD': // 记录操作
-                    this.recordOperation(event.data);
-                    // console.log('记录操作:', event.data);
-                    const matchedGoal = this.goals.find(g => g.action === event.data.action);
-                    // console.log('匹配目标:', matchedGoal, event.data.action);
-                    if (matchedGoal) this.setGoalDone(matchedGoal.id);
-                    break;
-                case 'EXPERIMENT_COMPLETE': // 实验完成
-                    this.goals.forEach(goal => this.setGoalDone(goal.id, false));
-                    this.currentProgress = 100;
-                    // this.handleExperimentComplete();
-                    break;
-            }
-        },
-        // 发送消息给实验内容
-        sendMessageToExp(message) {
-            const iframe = this.$refs.expIframe;
-            if (iframe && iframe.contentWindow) {
-                // 使用正确的目标源
-                iframe.contentWindow.postMessage(message, window.location.origin);
-            } else {
-                console.warn('iframe 未加载完成，无法发送消息');
-            }
-        },
-        // 保存学习进度到后端
-        async saveLearningProgress() {
-            try {
-                await api.post('/experiments/save-progress', {
-                    expId: this.$route.query.expId,
-                    progress: this.currentProgress,
-                    operations: this.operationData,
-                    goals: this.goals
-                });
-            } catch (error) {
-                console.error('进度保存失败:', error);
-            }
-        },
-        recordOperation(operation) { // 记录操作
-            this.operationData.push({
-                ...operation,
-                progress: this.currentProgress
-            });
-            // 自动保存进度
-            // this.saveLearningProgress();
-        },
-        calcProgress() {
-            // 按权重动态计算进度
-            const totalWeight = this.goals.reduce((sum, g) => sum + (g.weight || 1), 0);
-            const doneWeight = this.goals.filter(g => g.done).reduce((sum, g) => sum + (g.weight || 1), 0);
-            return totalWeight === 0 ? 0 : Math.round(100 * doneWeight / totalWeight);
-        },
-        setGoalDone(goalId, save = true) {
-            const goal = this.goals.find(g => g.id === goalId);
-            if (goal && !goal.done) {
-                goal.done = true;
-                // 记录完成时间和耗时
-                goal.finishTime = new Date().toISOString();
-                if (this.startTime) {
-                    goal.duration = this.calcGoalDuration(this.startTime, goal.finishTime);
-                } else {
-                    goal.duration = null;
-                }
-                this.currentProgress = this.calcProgress();
-                if (save) this.saveLearningProgress();
-                if (this.currentProgress === 100) this.handleExperimentComplete();
-            }
-        },
-        // 计算目标耗时（分钟）
-        calcGoalDuration(start, end) {
-            const duration = new Date(end) - new Date(start);
-            const minutes = Math.floor(duration / 1000 / 60);
-            const hours = Math.floor(minutes / 60);
-            return `${hours}小时${minutes % 60}分钟`;
-        },
-        // 处理实验完成
-        async handleExperimentComplete() {
-            // 向iframe发送实验完成消息，通知其截图
-            console.log('处理实验完成');
-            this.sendMessageToExp({ type: 'EXPERIMENT_COMPLETE' });
-            await this.saveLearningProgress();
-            this.showCompleteDialog = true;
-        },
-        downloadReport() {
-            try {
-                const user = JSON.parse(localStorage.getItem('user'));
-                if (!user) {
-                    throw new Error('用户信息获取失败');
-                }
-
-                ExperimentReport.exportPDF({
-                    user,
-                    expId: this.$route.query.expId,
-                    expTitle: this.experiment_title,
-                    goals: this.goals,
-                    operations: this.operationData,
-                    score: this.currentProgress,
-                    startTime: this.startTime || new Date().toISOString(),
-                    endTime: new Date().toISOString(),
-                    practiceScore: localStorage.getItem(`practice_score_${this.$route.query.expId}`),
-                    screenshotUrl: this.screenshotUrl,
-                    analysisResult: analysisResult.answer || 'AI 分析失败，请稍后重试。'
-                });
-            } catch (error) {
-                alert('实验报告导出失败，请稍后重试');
-                console.error('实验报告导出失败:', error);
-            }
-        },
-        // 离开确认
-        confirmLeave() {
-            if (confirm('确定要离开当前实验吗？未保存的进度可能会丢失')) {
-                this.$router.go(-1); // 返回上一页
-            }
-        },
-        async fetchExperimentGoals(expId) {
-            try {
-                const response = await api.get(`/experiments/${expId}/steps`);
-                const experimentTitle = await api.get(`/experiments/${expId}/title`);
-                this.experiment_title = experimentTitle.data.title;
-                const seenIds = new Set();
-                this.goals = response.data.steps.steps.map((step, index) => {
-                    if (seenIds.has(step.id)) {
-                        console.warn('发现重复的实验步骤ID:', step.id);
-                    }
-                    seenIds.add(step.id);
-                    return {
-                        id: step.id,
-                        title: step.title,
-                        done: false,
-                        weight: step.weight || 1,
-                        action: step.action || '',
-                        finishTime: null, 
-                        duration: null 
-                    };
-                });
-            } catch (error) {
-                console.error('获取实验目标失败:', error);
-            }
-        },
-        
+        fetchExperimentGoals(id);
+        loading.value = false;
+    } catch (err) {
+        console.error('加载实验配置失败:', err);
+        loading.value = false;
     }
+}
+
+async function fetchExperimentGoals(id) {
+    try {
+        const response = await api.get(`/experiments/${id}/steps`);
+        const experimentTitle = await api.get(`/experiments/${id}/title`);
+        experiment_title.value = experimentTitle.data.title;
+        const seenIds = new Set();
+        goals.value = response.data.steps.steps.map((step) => {
+            if (seenIds.has(step.id)) {
+                console.warn('发现重复的实验步骤ID:', step.id);
+            }
+            seenIds.add(step.id);
+            return {
+                id: step.id,
+                title: step.title,
+                done: false,
+                weight: step.weight || 1,
+                action: step.action || '',
+                finishTime: null,
+                duration: null,
+            };
+        });
+    } catch (error) {
+        console.error('获取实验目标失败:', error);
+    }
+}
+
+// ======== 引擎回调 ========
+function onGoalAchieved(data) {
+    if (data && data.id) {
+        let displayGoal = null;
+        displayGoal = goals.value.find(g => g.action === data.id);
+        if (!displayGoal) {
+            displayGoal = goals.value.find(g => g.id === data.id);
+        }
+        if (!displayGoal && experimentConfig.value?.goals) {
+            const engineIdx = experimentConfig.value.goals.findIndex(g => g.id === data.id);
+            if (engineIdx >= 0 && goals.value[engineIdx]) {
+                displayGoal = goals.value[engineIdx];
+            }
+        }
+        if (displayGoal && !displayGoal.done) {
+            setGoalDone(displayGoal.id, true);
+        }
+    }
+    // 目标完成时保存进度 + 当前电路拓扑（用于恢复）
+    saveLearningProgress(true);
+}
+
+function onProgressUpdate(progress) {
+    currentProgress.value = progress;
+    // 同步引擎进度到 goals（通过 action 字段匹配）
+    if (goals.value.length > 0 && experimentConfig.value?.goals) {
+        const engineGoals = experimentConfig.value.goals;
+        engineGoals.forEach((eg) => {
+            if (eg.done) {
+                const displayGoal = goals.value.find(g => g.action === eg.id);
+                if (displayGoal && !displayGoal.done) {
+                    displayGoal.done = true;
+                }
+            }
+        });
+    }
+}
+
+function onEngineReady() {
+    console.log('引擎就绪');
+    // 引擎就绪后，尝试恢复保存的电路
+    restoreCircuit();
+}
+
+// ======== 电路恢复 ========
+async function restoreCircuit() {
+    try {
+        // 所有目标已完成时跳过恢复（已完成实验重新进入应从头开始）
+        if (goals.value.length > 0 && goals.value.every(g => g.done)) {
+            console.log('实验已完成，跳过电路恢复');
+            return;
+        }
+        const { data } = await api.get(`/experiments/${expId}/saved-circuit`);
+        if (data?.circuit_components && Array.isArray(data.circuit_components) && data.circuit_components.length > 0) {
+            console.log(`恢复电路: ${data.circuit_components.length} 个元件`);
+            setTimeout(() => {
+                if (engineRef.value) {
+                    engineRef.value.restoreComponents(data.circuit_components);
+                }
+            }, 100);
+        }
+    } catch (err) {
+        // 没有保存的电路或请求失败，忽略
+    }
+}
+
+// ======== AI 电路数据转发 ========
+function onCircuitInfo(data) {
+    iframeData.value = data;
+}
+
+// ======== 键盘快捷键 ========
+function onKeyDown(e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        if (engineRef.value) {
+            const comps = engineRef.value.getComponents();
+            saveLearningProgress(true, comps);
+        }
+    }
+}
+onMounted(() => {
+    document.addEventListener('keydown', onKeyDown);
+});
+onUnmounted(() => {
+    document.removeEventListener('keydown', onKeyDown);
+});
+
+// ======== 目标管理 ========
+function setGoalDone(goalId, save = true) {
+    const goal = goals.value.find(g => g.id === goalId);
+    if (goal && !goal.done) {
+        goal.done = true;
+        goal.finishTime = new Date().toISOString();
+        goal.duration = startTime.value ? calcGoalDuration(startTime.value, goal.finishTime) : null;
+        currentProgress.value = calcProgress();
+        if (save) saveLearningProgress();
+        if (currentProgress.value === 100) handleExperimentComplete();
+    }
+}
+
+function calcProgress() {
+    const totalWeight = goals.value.reduce((sum, g) => sum + (g.weight || 1), 0);
+    const doneWeight = goals.value.filter(g => g.done).reduce((sum, g) => sum + (g.weight || 1), 0);
+    return totalWeight === 0 ? 0 : Math.round(100 * doneWeight / totalWeight);
+}
+
+function calcGoalDuration(start, end) {
+    const duration = new Date(end) - new Date(start);
+    const minutes = Math.floor(duration / 1000 / 60);
+    const hours = Math.floor(minutes / 60);
+    return `${hours}小时${minutes % 60}分钟`;
+}
+
+async function handleExperimentComplete() {
+    console.log('处理实验完成');
+    await saveLearningProgress(true);
+    showCompleteDialog.value = true;
+}
+
+// ======== 进度保存（带电路拓扑）========
+async function saveLearningProgress(includeCircuit = false, manualComponents = null) {
+    const payload = {
+        expId,
+        progress: currentProgress.value,
+        operations: operationData.value,
+        goals: goals.value,
+    };
+    if (includeCircuit) {
+        let comps = manualComponents;
+        if (!comps && engineRef.value) {
+            comps = engineRef.value.getComponents();
+        }
+        if (comps) {
+            payload.circuit_components = JSON.parse(JSON.stringify(comps));
+        }
+    }
+    try {
+        await api.post('/experiments/save-progress', payload);
+    } catch (error) {
+        console.error('进度保存失败:', error);
+    }
+}
+
+function recordOperation(operation) {
+    operationData.value.push({
+        ...operation,
+        progress: currentProgress.value,
+    });
+}
+
+// ======== 导航 ========
+async function goToExperimentFeeling() {
+    router.push({
+        name: 'ExperimentFeeling',
+        query: {
+            expId,
+            expTitle: experiment_title.value,
+            goals: JSON.stringify(goals.value),
+            operations: JSON.stringify(operationData.value),
+            progress: currentProgress.value,
+            startTime: startTime.value,
+            endTime: new Date().toISOString(),
+            practiceScore: localStorage.getItem(`practice_score_${expId}`) || 0,
+            screenshotUrl: screenshotUrl.value || '',
+            behaviorlogs: JSON.stringify(behaviorlogs.value),
+        },
+    });
+}
+
+function confirmLeave() {
+    if (confirm('确定要离开当前实验吗？未保存的进度可能会丢失')) {
+        router.go(-1);
+    }
+}
+
+function downloadReport() {
+    try {
+        const user = JSON.parse(localStorage.getItem('user'));
+        if (!user) throw new Error('用户信息获取失败');
+
+        ExperimentReport.exportPDF({
+            user,
+            expId,
+            expTitle: experiment_title.value,
+            goals: goals.value,
+            operations: operationData.value,
+            score: currentProgress.value,
+            startTime: startTime.value || new Date().toISOString(),
+            endTime: new Date().toISOString(),
+            practiceScore: localStorage.getItem(`practice_score_${expId}`),
+            screenshotUrl: screenshotUrl.value,
+            analysisResult: 'AI 分析失败，请稍后重试。',
+        });
+    } catch (error) {
+        alert('实验报告导出失败，请稍后重试');
+        console.error('实验报告导出失败:', error);
+    }
+}
+
+// ======== UI 交互 ========
+function handleAIAssistantClick() {
+    showChatWindow.value = true;
+}
+
+function toggleGuide() {
+    showGuide.value = !showGuide.value;
+}
+function hideGuide() {
+    showGuide.value = !showGuide.value;
 }
 </script>
 
@@ -533,6 +475,18 @@ export default {
 .experiment-learning {
     height: 100%;
     position: relative;
+}
+
+/* 引擎容器：覆盖在背景图上，避开顶部导航栏 */
+.engine-wrapper {
+    position: absolute;
+    top: 64px;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 200;
+    background: #fff;
+    overflow: hidden;
 }
 
 .experiment-iframe {
@@ -838,5 +792,36 @@ export default {
 
 .help-button:hover {
     background: #1251a3;
+}
+
+/* AI 助手按钮 — 纯色小球，右侧半收，hover 展开 */
+.ai-assistant {
+  position: fixed;
+  z-index: 10000;
+  border-radius: 50%;
+  bottom: 40px;
+  right: -28px;
+  width: 56px;
+  height: 56px;
+  border: none;
+  background: #66a6ff;
+  box-shadow: 0 4px 12px rgba(102, 166, 255, 0.3);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.5s cubic-bezier(0.68, -0.55, 0.27, 1.55);
+}
+.ai-assistant::after {
+  color: white;
+  font-weight: bold;
+  font-size: 20px;
+  letter-spacing: 1px;
+  pointer-events: none;
+}
+.ai-assistant:hover {
+  right: 0;
+  transform: rotate(360deg) scale(1.1);
+  box-shadow: 0 6px 20px rgba(102, 166, 255, 0.6);
 }
 </style>

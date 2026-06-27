@@ -1,49 +1,49 @@
 // 负责实验结构有关的元件引脚和交互逻辑
 
-// 定义各元件的引脚位置
+// 定义各元件的引脚位置（含名称标签）
 export function getComponentPins(GRID_SIZE) {
     return {
-        'resistor': [{x: -GRID_SIZE, y: 0}, {x: GRID_SIZE, y: 0}], // 电阻
-        'battery': [{x: 0, y: 0}], // 电源
-        'bulb': [{x: -GRID_SIZE, y: 0}, {x: GRID_SIZE, y: 0}], // 灯泡
-        'capacitor': [{x: -GRID_SIZE, y: 0}, {x: GRID_SIZE, y: 0}], // 电容
-        'electrolytic-capacitor': [{x: -GRID_SIZE, y: 0}, {x: GRID_SIZE, y: 0}], // 电解电容
-        'diode': [{x: -GRID_SIZE, y: 0}, {x: GRID_SIZE, y: 0}], // 二极管
+        'resistor': [{x: -GRID_SIZE, y: 0, label: '1'}, {x: GRID_SIZE, y: 0, label: '2'}],
+        'battery': [{x: 0, y: 0, label: '+'}],
+        'bulb': [{x: -GRID_SIZE, y: 0, label: '1'}, {x: GRID_SIZE, y: 0, label: '2'}],
+        'capacitor': [{x: -GRID_SIZE, y: 0, label: '1'}, {x: GRID_SIZE, y: 0, label: '2'}],
+        'electrolytic-capacitor': [{x: -GRID_SIZE, y: 0, label: '-'}, {x: GRID_SIZE, y: 0, label: '+'}],
+        'diode': [{x: -GRID_SIZE, y: 0, label: 'A(阳极)'}, {x: GRID_SIZE, y: 0, label: 'K(阴极)'}],
         'transistor-npn': [
-            {x: -GRID_SIZE, y: 0},   // B极（左）
-            {x: GRID_SIZE, y: -GRID_SIZE},  // C极（右上）
-            {x: GRID_SIZE, y: GRID_SIZE}    // E极（右下）
+            {x: -GRID_SIZE, y: 0, label: 'B(基极)'},
+            {x: GRID_SIZE, y: -GRID_SIZE, label: 'C(集电极)'},
+            {x: GRID_SIZE, y: GRID_SIZE, label: 'E(发射极)'}
         ],
         'transistor-pnp': [
-            {x: -GRID_SIZE, y: 0},   // B极（左）
-            {x: GRID_SIZE, y: -GRID_SIZE},  // C极（右上）
-            {x: GRID_SIZE, y: GRID_SIZE}    // E极（右下）
+            {x: -GRID_SIZE, y: 0, label: 'B(基极)'},
+            {x: GRID_SIZE, y: -GRID_SIZE, label: 'C(集电极)'},
+            {x: GRID_SIZE, y: GRID_SIZE, label: 'E(发射极)'}
         ],
-        'ground': [{x: 0, y: 0}],
-        'switch': [{x: -GRID_SIZE, y: 0}, {x: GRID_SIZE, y: 0}],
+        'ground': [{x: 0, y: 0, label: 'GND'}],
+        'switch': [{x: -GRID_SIZE, y: 0, label: '1'}, {x: GRID_SIZE, y: 0, label: '2'}],
         'and-gate': [
-            {x: -GRID_SIZE, y: -GRID_SIZE, type: 'input'},   // 输入1
-            {x: -GRID_SIZE, y: GRID_SIZE, type: 'input'},     // 输入2
-            {x: GRID_SIZE, y: 0, type: 'output'}                   // 输出
+            {x: -GRID_SIZE, y: -GRID_SIZE, type: 'input', label: 'IN1'},
+            {x: -GRID_SIZE, y: GRID_SIZE, type: 'input', label: 'IN2'},
+            {x: GRID_SIZE, y: 0, type: 'output', label: 'OUT'}
         ],
         'or-gate': [
-            {x: -GRID_SIZE, y: -GRID_SIZE, type: 'input'},
-            {x: -GRID_SIZE, y: GRID_SIZE, type: 'input'},
-            {x: GRID_SIZE, y: 0, type: 'output'}
+            {x: -GRID_SIZE, y: -GRID_SIZE, type: 'input', label: 'IN1'},
+            {x: -GRID_SIZE, y: GRID_SIZE, type: 'input', label: 'IN2'},
+            {x: GRID_SIZE, y: 0, type: 'output', label: 'OUT'}
         ],
         'not-gate': [
-            {x: -GRID_SIZE, y: 0, type: 'input'},                 // 输入
-            {x: GRID_SIZE, y: 0, type: 'output'}                   // 输出
+            {x: -GRID_SIZE, y: 0, type: 'input', label: 'IN'},
+            {x: GRID_SIZE, y: 0, type: 'output', label: 'OUT'}
         ],
         'nand-gate': [
-            {x: -GRID_SIZE, y: -GRID_SIZE, type: 'input'},
-            {x: -GRID_SIZE, y: GRID_SIZE, type: 'input'},
-            {x: GRID_SIZE, y: 0, type: 'output'}
+            {x: -GRID_SIZE, y: -GRID_SIZE, type: 'input', label: 'IN1'},
+            {x: -GRID_SIZE, y: GRID_SIZE, type: 'input', label: 'IN2'},
+            {x: GRID_SIZE, y: 0, type: 'output', label: 'OUT'}
         ],
         'nor-gate': [
-            {x: -GRID_SIZE, y: -GRID_SIZE, type: 'input'},
-            {x: -GRID_SIZE, y: GRID_SIZE, type: 'input'},
-            {x: GRID_SIZE, y: 0, type: 'output'}
+            {x: -GRID_SIZE, y: -GRID_SIZE, type: 'input', label: 'IN1'},
+            {x: -GRID_SIZE, y: GRID_SIZE, type: 'input', label: 'IN2'},
+            {x: GRID_SIZE, y: 0, type: 'output', label: 'OUT'}
         ]
     };
 }

@@ -217,17 +217,30 @@ router.post('/user/tasks', auth, async (req, res) => {
 // 上传学生每次实验操作历史
 router.post('/save-progress', auth, async (req, res) => {
     try {
-        const { expId, progress, operations, goals } = req.body;
+        const { expId, progress, operations, goals, circuit_components } = req.body;
         const userId = req.user.id;
         const isCompleted = progress >= 100;
 
-        // 插入新实践记录
-        await db.query(
-            `INSERT INTO experiment_attempts 
-            (user_id, exp_id, progress, is_completed, operations, goals, end_time)
-            VALUES (?, ?, ?, ?, ?, ?, NOW())`,
-            [userId, expId, progress, isCompleted ? 1 : 0, JSON.stringify(operations), JSON.stringify(goals)]
+        // 将电路数据嵌入 goals JSON 中，避免改表结构
+        const goalsWithCircuit = { goals, circuit_components };
+
+        // 更新或插入 experiment_attempts
+        const [lastAttempt] = await db.query(
+            'SELECT attempt_id FROM experiment_attempts WHERE user_id = ? AND exp_id = ? ORDER BY attempt_id DESC LIMIT 1',
+            [userId, expId]
         );
+        if (lastAttempt) {
+            await db.query(
+                `UPDATE experiment_attempts SET progress = ?, is_completed = ?, operations = ?, goals = ?, end_time = NOW() WHERE attempt_id = ?`,
+                [progress, isCompleted ? 1 : 0, JSON.stringify(operations), JSON.stringify(goalsWithCircuit), lastAttempt.attempt_id]
+            );
+        } else {
+            await db.query(
+                `INSERT INTO experiment_attempts (user_id, exp_id, progress, is_completed, operations, goals, end_time)
+                VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+                [userId, expId, progress, isCompleted ? 1 : 0, JSON.stringify(operations), JSON.stringify(goalsWithCircuit)]
+            );
+        }
 
         // 更新user_experiments表（只保留最高进度和完成状态）
         const [userExp] = await db.query(
@@ -262,6 +275,28 @@ router.post('/save-progress', auth, async (req, res) => {
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: '保存实验实践记录失败' });
+    }
+});
+
+// 获取用户保存的电路状态（用于意外离开后恢复）
+router.get('/:expId/saved-circuit', auth, async (req, res) => {
+    try {
+        const { expId } = req.params;
+        const userId = req.user.id;
+        const [attempt] = await db.query(
+            'SELECT goals FROM experiment_attempts WHERE user_id = ? AND exp_id = ? ORDER BY attempt_id DESC LIMIT 1',
+            [userId, expId]
+        );
+        if (!attempt) return res.json({ circuit_components: null });
+
+        let goals = attempt.goals;
+        if (typeof goals === 'string') goals = JSON.parse(goals);
+        const circuit_components = goals?.circuit_components || null;
+
+        res.json({ circuit_components });
+    } catch (err) {
+        console.error('获取保存的电路失败:', err);
+        res.status(500).json({ error: '获取保存的电路失败' });
     }
 });
 
@@ -388,5 +423,88 @@ router.get('/:id/students', async (req, res) => {
     }
 });
 
+// 获取实验引擎配置（支持从 experiment_configs 表读取，无配置时返回传统模式）
+router.get('/:expId/config', async (req, res) => {
+    try {
+        const { expId } = req.params;
+
+        // 先查 experiment_configs 表
+        const [configRow] = await db.query(
+            'SELECT config FROM experiment_configs WHERE exp_id = ?',
+            [expId]
+        );
+
+        if (configRow) {
+            let config = configRow.config;
+            if (typeof config === 'string') config = JSON.parse(config);
+
+            // 自动同步：确保 experiments.steps 和 element 与 engine config 一致
+            if (config.goals) {
+                const steps = {
+                    steps: config.goals.map((g, i) => ({
+                        id: (g.id || '').toLowerCase().replace(/_/g, '-').replace(/^goal-/, '') || `step_${i + 1}`,
+                        title: g.title,
+                        action: g.id,
+                        weight: g.weight || 1,
+                        done: false,
+                    })),
+                };
+                // element ID 映射
+                const typeToId = {
+                    wire: 1, switch: 2, bulb: 3, resistor: 4, capacitor: 5,
+                    diode: 6, 'transistor-npn': 7, 'transistor-pnp': 8,
+                    battery: 9, ground: 10, 'and-gate': 11, 'or-gate': 12,
+                    'not-gate': 13, 'nand-gate': 14, 'nor-gate': 15,
+                };
+                const element = (config.availableComponents || [])
+                    .map(type => typeToId[type])
+                    .filter(id => id != null);
+
+                // 静默同步（仅当不同时才写入）
+                try {
+                    await db.query(
+                        'UPDATE experiments SET steps = ?, element = ? WHERE exp_id = ?',
+                        [JSON.stringify(steps), JSON.stringify(element), expId]
+                    );
+                } catch (syncErr) {
+                    // 同步失败不影响主流程
+                    console.warn(`  [config] 同步 steps/element 失败: ${syncErr.message}`);
+                }
+            }
+
+            return res.json({ data: { engineMode: true, config } });
+        }
+
+        // 无引擎配置 → 返回传统模式信息
+        const [experiment] = await db.query(
+            'SELECT exp_id AS id, title, steps, element FROM experiments WHERE exp_id = ?',
+            [expId]
+        );
+
+        if (!experiment) {
+            return res.status(404).json({ error: '实验不存在' });
+        }
+
+        let steps = experiment.steps;
+        if (typeof steps === 'string') {
+            try { steps = JSON.parse(steps); } catch { steps = { steps: [] }; }
+        }
+
+        res.json({
+            data: {
+                engineMode: false,
+                experiment: {
+                    id: experiment.id,
+                    title: experiment.title,
+                    steps: steps.steps || [],
+                    element: experiment.element,
+                },
+            },
+        });
+    } catch (err) {
+        console.error('获取实验配置失败:', err);
+        res.status(500).json({ error: '获取实验配置失败' });
+    }
+});
 
 export default router;

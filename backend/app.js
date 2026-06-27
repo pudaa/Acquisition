@@ -27,7 +27,8 @@ app.use('/api/discussion', discussionRouter);
 app.use('/api/practice', practice);
 app.use('/api/class', classRouter);
 app.use('/api/correction-notebook', practice);
-app.use('/api/ai', aiRouter); 
+app.use('/api/ai', aiRouter);
+
 // 启动服务器
 const PORT = process.env.PORT || 5550;
 const server = app.listen(PORT, "0.0.0.0", () => {

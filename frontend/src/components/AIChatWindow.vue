@@ -157,6 +157,7 @@ let compIdMap = new Map();
 let nodeKeyMap = new Map();
 let edges = new Array();
 let nodes = new Array();
+let components = new Array(); // 引脚详情
 
 // 监听iframeData变化（如有需要可处理）
 watch(() => props.iframeData, (newVal) => {
@@ -166,6 +167,7 @@ watch(() => props.iframeData, (newVal) => {
     compIdMap = newVal.compIdMap;
     edges = newVal.edges || [];
     nodes = newVal.nodes || [];
+    components = newVal.components || [];
   }
 });
 
@@ -208,6 +210,7 @@ const sendMessage = async () => {
         edges,
         compIdMap: compIdMapObj,
         nodeKeyMap: nodeKeyMapObj,
+        components,
       },
       history: chatHistory.value.slice(0, -1).map(m => ({
         role: m.role,

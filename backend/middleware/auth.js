@@ -9,8 +9,6 @@ const auth = (req, res, next) => {
         }
         
         const token = authHeader.split(' ')[1];
-        console.log('接收到的认证头:', authHeader); 
-        console.log('接收到的Token:', token); 
         
         if (!token) {
             return res.status(401).json({ error: '令牌不能为空' });
