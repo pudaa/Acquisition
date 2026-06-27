@@ -44,7 +44,12 @@ export function getComponentPins(GRID_SIZE) {
             {x: -GRID_SIZE, y: -GRID_SIZE, type: 'input', label: 'IN1'},
             {x: -GRID_SIZE, y: GRID_SIZE, type: 'input', label: 'IN2'},
             {x: GRID_SIZE, y: 0, type: 'output', label: 'OUT'}
-        ]
+        ],
+        'inductor': [{x: -GRID_SIZE, y: 0, label: '1'}, {x: GRID_SIZE, y: 0, label: '2'}],
+        'photoresistor': [{x: -GRID_SIZE, y: 0, label: '1'}, {x: GRID_SIZE, y: 0, label: '2'}],
+        'potentiometer': [{x: -GRID_SIZE, y: 0, label: '1'}, {x: GRID_SIZE, y: 0, label: '2'}],
+        'buzzer': [{x: -GRID_SIZE, y: 0, label: '1'}, {x: GRID_SIZE, y: 0, label: '2'}],
+        'fuse': [{x: -GRID_SIZE, y: 0, label: '1'}, {x: GRID_SIZE, y: 0, label: '2'}],
     };
 }
 

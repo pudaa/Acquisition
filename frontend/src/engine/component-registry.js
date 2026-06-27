@@ -9,6 +9,7 @@ const TYPE_PREFIX = {
   'and-gate': 'U1', 'or-gate': 'U2', 'not-gate': 'U3',
   'nand-gate': 'U4', 'nor-gate': 'U5',
   wire: 'W', inductor: 'L',
+  photoresistor: 'PR', potentiometer: 'POT', buzzer: 'BZ', fuse: 'F',
 };
 
 export class ComponentRegistry {

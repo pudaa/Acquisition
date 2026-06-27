@@ -387,3 +387,115 @@ registerRenderer('nor-gate', (ctx, comp, gs, options) => {
   ctx.arc((5 / 8 * gs), 0, (1 / 8 * gs), 0, Math.PI * 2);
   ctx.stroke();
 });
+
+// ============ 新增元件渲染器 ============
+
+// ---- 电感 ----
+registerRenderer('inductor', (ctx, comp, gs, options) => {
+  ctx.beginPath();
+  ctx.moveTo(-gs, 0);
+  ctx.lineTo(-(3 / 4 * gs), 0);
+  const loops = 4, amp = (1 / 3 * gs), segW = (1.5 * gs) / (loops * 2);
+  for (let i = 0; i < loops * 2; i++) {
+    const x = -(3 / 4 * gs) + i * segW;
+    const y = i % 2 === 0 ? -amp : amp;
+    ctx.lineTo(x, y);
+  }
+  ctx.lineTo((3 / 4 * gs), 0);
+  ctx.lineTo(gs, 0);
+  ctx.stroke();
+  if (comp.value) {
+    ctx.fillStyle = '#666';
+    ctx.font = '10px sans-serif';
+    ctx.fillText((comp.value || '') + 'mH', -14, -(3 / 4 * gs));
+  }
+});
+
+// ---- 光敏电阻 ----
+registerRenderer('photoresistor', (ctx, comp, gs, options) => {
+  ctx.beginPath();
+  ctx.moveTo(-gs, 0);
+  ctx.lineTo(-(3 / 4 * gs), 0);
+  ctx.lineTo(-(3 / 4 * gs), -(1 / 3 * gs));
+  ctx.lineTo((3 / 4 * gs), -(1 / 3 * gs));
+  ctx.lineTo((3 / 4 * gs), (1 / 3 * gs));
+  ctx.lineTo(-(3 / 4 * gs), (1 / 3 * gs));
+  ctx.lineTo(-(3 / 4 * gs), 0);
+  ctx.moveTo((3 / 4 * gs), 0);
+  ctx.lineTo(gs, 0);
+  ctx.stroke();
+  ctx.fillStyle = '#e8a020';
+  ctx.beginPath();
+  ctx.arc(0, -(1 / 2 * gs), 3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#e8a020';
+  ctx.lineWidth = 1;
+  for (let dy = -(1 / 2 * gs) - 8; dy >= -(3 / 4 * gs) - 10; dy -= 4) {
+    ctx.beginPath(); ctx.moveTo(0, dy); ctx.lineTo(0, dy - 3); ctx.stroke();
+  }
+  ctx.strokeStyle = '#222'; ctx.lineWidth = 2;
+});
+
+// ---- 滑动变阻器 ----
+registerRenderer('potentiometer', (ctx, comp, gs, options) => {
+  ctx.beginPath();
+  ctx.moveTo(-gs, 0);
+  ctx.lineTo(-(3 / 4 * gs), 0);
+  ctx.lineTo(-(3 / 4 * gs), -(1 / 3 * gs));
+  ctx.lineTo((3 / 4 * gs), -(1 / 3 * gs));
+  ctx.lineTo((3 / 4 * gs), (1 / 3 * gs));
+  ctx.lineTo(-(3 / 4 * gs), (1 / 3 * gs));
+  ctx.lineTo(-(3 / 4 * gs), 0);
+  ctx.moveTo((3 / 4 * gs), 0);
+  ctx.lineTo(gs, 0);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(0, -(1 / 3 * gs) - 6);
+  ctx.lineTo(0, -(1 / 3 * gs));
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(-4, -(1 / 3 * gs) - 4);
+  ctx.lineTo(0, -(1 / 3 * gs));
+  ctx.lineTo(4, -(1 / 3 * gs) - 4);
+  ctx.stroke();
+});
+
+// ---- 蜂鸣器 ----
+registerRenderer('buzzer', (ctx, comp, gs, options) => {
+  ctx.beginPath();
+  ctx.arc(0, (1 / 4 * gs), (5 / 8 * gs), Math.PI, 0);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(-gs, 0);
+  ctx.lineTo(-(5 / 8 * gs), 0);
+  ctx.moveTo(gs, 0);
+  ctx.lineTo((5 / 8 * gs), 0);
+  ctx.stroke();
+  ctx.strokeStyle = '#555';
+  ctx.lineWidth = 1;
+  const cx = (1 / 2 * gs), cy = -(1 / 4 * gs);
+  for (let r = 5; r <= 14; r += 4) {
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, -Math.PI / 2, 0);
+    ctx.stroke();
+  }
+  ctx.strokeStyle = '#222'; ctx.lineWidth = 2;
+});
+
+// ---- 保险丝 ----
+registerRenderer('fuse', (ctx, comp, gs, options) => {
+  ctx.beginPath();
+  ctx.moveTo(-gs, 0);
+  ctx.lineTo(-(5 / 8 * gs), 0);
+  ctx.moveTo((5 / 8 * gs), 0);
+  ctx.lineTo(gs, 0);
+  ctx.stroke();
+  ctx.strokeRect(-(5 / 8 * gs), -(3 / 8 * gs), (5 / 4 * gs), (3 / 4 * gs));
+  ctx.beginPath();
+  ctx.moveTo(-(1 / 2 * gs), 0);
+  ctx.lineTo(-(1 / 4 * gs), -(1 / 6 * gs));
+  ctx.lineTo(0, (1 / 6 * gs));
+  ctx.lineTo((1 / 4 * gs), -(1 / 6 * gs));
+  ctx.lineTo((1 / 2 * gs), 0);
+  ctx.stroke();
+});

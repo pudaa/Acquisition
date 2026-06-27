@@ -43,12 +43,12 @@
     <!-- 主区域（画布四周留白） -->
     <div class="engine-main">
       <div class="canvas-wrapper">
-        <canvas ref="canvas" class="engine-canvas"></canvas>
+        <canvas ref="canvas" class="engine-canvas" :style="{ cursor: canvasCursor }"></canvas>
       </div>
       <div class="grid-control">
         <label>网格</label>
         <input type="range" min="10" max="50" v-model.number="gridSize" title="网格大小" />
-        <span class="save-hint" title="Ctrl+S 保存电路">Ctrl+S 保存</span>
+        <span class="status-hint">{{ hintText }}</span>
       </div>
     </div>
 
@@ -129,6 +129,7 @@ let simEngine = null;
 let tempComponent = null;
 let wireStartGrid = null;
 let wireMouseGrid = null; // 导线预览目标格点
+let wireBendPoints = [];  // 导线中间曲折点列表
 let currentMouseX = 0;
 let currentMouseY = 0;
 let goalEngine = null;
@@ -136,6 +137,15 @@ let resizeObserver = null;
 let oscAnimId = null;
 let oscVoltageBuffer = [];
 let componentRegistry = new ComponentRegistry();
+
+// 画布平移
+let offsetX = 0;
+let offsetY = 0;
+let isPanning = false;
+let panStartX = 0;
+let panStartY = 0;
+let panStartOffsetX = 0;
+let panStartOffsetY = 0;
 
 // 记录待放置元件的旋转角度（独立于 tempComponent，避免被 onMouseMove 覆盖）
 let pendingRotation = 0;
@@ -164,6 +174,30 @@ defineExpose({
 // ======== 计算属性 ========
 const availableComponents = computed(() => props.config.availableComponents || []);
 
+// 底部状态栏提示
+const hintText = computed(() => {
+  if (isDeleteMode.value) return '🗑 删除模式：左键点击元件删除 | 再次点击🗑退出';
+  if (selectedType.value === 'wire') {
+    if (wireStartGrid) {
+      return '🔗 连线中：左键网格添加曲折点 | 左键点击引脚完成连线 | 右键/Esc取消';
+    }
+    return '🔗 连线模式：左键点击元件引脚开始连线 | 点击其他工具取消';
+  }
+  if (selectedType.value) {
+    const name = labels[selectedType.value] || selectedType.value;
+    return `📐 放置「${name}」：左键放置 | 右键/R键旋转 | 点击其他工具取消`;
+  }
+  return '🖱 Ctrl+滚轮缩放 | 右键拖拽平移画布 | 左键点击开关可切换状态';
+});
+
+// 画布光标样式
+const canvasCursor = computed(() => {
+  if (isPanning) return 'grabbing';
+  if (isDeleteMode.value) return 'pointer';
+  if (selectedType.value) return 'crosshair';
+  return 'grab';
+});
+
 // 元件标签映射
 const labels = {
   wire: '导线', battery: '电源', ground: '接地', switch: '开关',
@@ -171,6 +205,8 @@ const labels = {
   'transistor-npn': 'NPN', 'transistor-pnp': 'PNP',
   'and-gate': '与门', 'or-gate': '或门', 'not-gate': '非门',
   'nand-gate': '与非门', 'nor-gate': '或非门',
+  inductor: '电感', photoresistor: '光敏电阻', potentiometer: '变阻器',
+  buzzer: '蜂鸣器', fuse: '保险丝',
 };
 
 const iconMap = {
@@ -180,6 +216,8 @@ const iconMap = {
   'transistor-npn': 'transistor_npn.png', 'transistor-pnp': 'transistor_pnp.png',
   'and-gate': 'and-gate.png', 'or-gate': 'or-gate.png',
   'not-gate': 'not-gate.png', 'nand-gate': 'nand-gate.png', 'nor-gate': 'nor-gate.png',
+  inductor: 'wire.png', photoresistor: 'resistance.png', potentiometer: 'resistance.png',
+  buzzer: 'bulb.png', fuse: 'switch.png',
 };
 
 function getIconUrl(type) { return `/button_icons/${iconMap[type] || 'wire.png'}`; }
@@ -193,9 +231,18 @@ function selectComponent(type) {
   isDeleteMode.value = false;
   pendingRotation = 0;
   tempComponent = null;
+  wireStartGrid = null;
+  wireMouseGrid = null;
+  wireBendPoints = [];
 }
 
-function toggleDelete() { isDeleteMode.value = !isDeleteMode.value; selectedType.value = null; }
+function toggleDelete() {
+  isDeleteMode.value = !isDeleteMode.value;
+  selectedType.value = null;
+  wireStartGrid = null;
+  wireMouseGrid = null;
+  wireBendPoints = [];
+}
 
 // ======== Canvas 尺寸自适应 ========
 function resizeCanvas() {
@@ -304,6 +351,10 @@ function initCanvas() {
   canvas.value.addEventListener('click', onCanvasClick);
   canvas.value.addEventListener('contextmenu', onRightClick);
   canvas.value.addEventListener('mouseleave', onMouseLeave);
+  canvas.value.addEventListener('wheel', onWheel, { passive: false });
+  canvas.value.addEventListener('mousedown', onMouseDown);
+  window.addEventListener('mouseup', onMouseUp);
+  window.addEventListener('keydown', onKeyDown);
 }
 
 // ======== 电压历史追踪（供示波器使用）=======
@@ -336,59 +387,76 @@ function draw(comps, frame) {
 
   ctx.clearRect(0, 0, w, h);
 
-  // 留出内边距
+  const viewW = w - CANVAS_PADDING * 2;
+  const viewH = h - CANVAS_PADDING * 2;
+
+  // ---- 第 1 层：网格背景（固定于视口，仅响应缩放） ----
   ctx.save();
   ctx.translate(CANVAS_PADDING, CANVAS_PADDING);
-
-  // 裁剪区域
   ctx.beginPath();
-  ctx.rect(0, 0, w - CANVAS_PADDING * 2, h - CANVAS_PADDING * 2);
+  ctx.rect(0, 0, viewW, viewH);
   ctx.clip();
+  engineDrawGrid(ctx, { width: viewW, height: viewH }, gs, 0, 0);
+  ctx.restore();
 
-  // 网格
-  engineDrawGrid(ctx, { width: w - CANVAS_PADDING * 2, height: h - CANVAS_PADDING * 2 }, gs, 0, 0);
+  // ---- 第 2 层：元件 + 导线（跟随平移偏移） ----
+  ctx.save();
+  ctx.translate(CANVAS_PADDING + offsetX, CANVAS_PADDING + offsetY);
+
+  // 裁剪到可见区域（世界坐标）
+  ctx.beginPath();
+  ctx.rect(-offsetX, -offsetY, viewW, viewH);
+  ctx.clip();
 
   // 导线 + 元件
   if (comps) {
+    const wireSegments = [];
     comps.forEach(comp => {
       if (comp.type === 'wire') {
-        drawWire(ctx, gs,
-          { x: comp.xGrid * gs, y: comp.yGrid * gs },
-          { x: comp.x2Grid * gs, y: comp.y2Grid * gs }
-        );
+        const segs = getWireSegments(comp, gs);
+        wireSegments.push({ comp, segs });
+        drawWirePath(ctx, gs, comp);
       } else {
         drawComponent(ctx, comp, gs, getComponentPins, { lit: comp.lit });
       }
     });
+    drawWireDecorations(ctx, wireSegments, gs);
   }
 
-  // 导线预览（虚线，L形折线，与真实导线绘制一致）
+  // 导线预览（虚线，支持曲折点）
   if (wireStartGrid) {
     const cur = wireMouseGrid || wireStartGrid;
     ctx.save();
-    ctx.strokeStyle = '#555';
+    ctx.strokeStyle = '#1976d2';
     ctx.lineWidth = 2.5;
     ctx.setLineDash([6, 4]);
-    const sx = wireStartGrid.xGrid * gs;
-    const sy = wireStartGrid.yGrid * gs;
-    const ex = cur.xGrid * gs;
-    const ey = cur.yGrid * gs;
-    const dx = ex - sx;
-    const dy = ey - sy;
+    // 构建完整路径：起点 → bendPoints → 鼠标位置
+    const allPoints = [
+      { x: wireStartGrid.xGrid * gs, y: wireStartGrid.yGrid * gs },
+      ...wireBendPoints.map(bp => ({ x: bp.xGrid * gs, y: bp.yGrid * gs })),
+      { x: cur.xGrid * gs, y: cur.yGrid * gs },
+    ];
     ctx.beginPath();
-    ctx.moveTo(sx, sy);
-    if (Math.abs(dx) > Math.abs(dy)) {
-      ctx.lineTo(ex, sy);
-    } else {
-      ctx.lineTo(sx, ey);
+    ctx.moveTo(allPoints[0].x, allPoints[0].y);
+    for (let i = 0; i < allPoints.length - 1; i++) {
+      const a = allPoints[i], b = allPoints[i + 1];
+      const dx = b.x - a.x, dy = b.y - a.y;
+      if (Math.abs(dx) > Math.abs(dy)) {
+        ctx.lineTo(b.x, a.y);
+      } else {
+        ctx.lineTo(a.x, b.y);
+      }
+      ctx.lineTo(b.x, b.y);
     }
-    ctx.lineTo(ex, ey);
     ctx.stroke();
-    // 起点圆点
-    ctx.fillStyle = '#555';
-    ctx.beginPath();
-    ctx.arc(sx, sy, 3, 0, Math.PI * 2);
-    ctx.fill();
+    // 所有已确认的点画小圆
+    ctx.fillStyle = '#1976d2';
+    ctx.setLineDash([]);
+    for (let i = 0; i < allPoints.length - 1; i++) {
+      ctx.beginPath();
+      ctx.arc(allPoints[i].x, allPoints[i].y, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
     ctx.restore();
   }
 
@@ -399,13 +467,180 @@ function draw(comps, frame) {
   ctx.restore();
 }
 
+// ======== 导线交叉渲染辅助 ========
+
+/** 获取导线的所有像素坐标线段 */
+function getWireSegments(comp, gs) {
+  const segs = [];
+  const points = [{ x: comp.xGrid * gs, y: comp.yGrid * gs }];
+  if (comp.bendPoints && comp.bendPoints.length > 0) {
+    comp.bendPoints.forEach(bp => points.push({ x: bp.xGrid * gs, y: bp.yGrid * gs }));
+  }
+  points.push({ x: comp.x2Grid * gs, y: comp.y2Grid * gs });
+
+  for (let i = 0; i < points.length - 1; i++) {
+    // 每段拆分为水平和垂直两段（L形折线）
+    const a = points[i], b = points[i + 1];
+    const dx = b.x - a.x, dy = b.y - a.y;
+    if (Math.abs(dx) > Math.abs(dy)) {
+      const mid = { x: b.x, y: a.y };
+      segs.push({ a: { ...a }, b: { ...mid } });
+      segs.push({ a: { ...mid }, b: { ...b } });
+    } else {
+      const mid = { x: a.x, y: b.y };
+      segs.push({ a: { ...a }, b: { ...mid } });
+      segs.push({ a: { ...mid }, b: { ...b } });
+    }
+  }
+  return segs;
+}
+
+/** 绘制导线路径（不含端点圆点，由 decorate 统一处理） */
+function drawWirePath(ctx, gs, comp) {
+  ctx.save();
+  ctx.strokeStyle = '#333';
+  ctx.lineWidth = 3;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  const points = [{ x: comp.xGrid * gs, y: comp.yGrid * gs }];
+  if (comp.bendPoints && comp.bendPoints.length > 0) {
+    comp.bendPoints.forEach(bp => points.push({ x: bp.xGrid * gs, y: bp.yGrid * gs }));
+  }
+  points.push({ x: comp.x2Grid * gs, y: comp.y2Grid * gs });
+
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i], b = points[i + 1];
+    const dx = b.x - a.x, dy = b.y - a.y;
+    if (Math.abs(dx) > Math.abs(dy)) {
+      ctx.lineTo(b.x, a.y);
+    } else {
+      ctx.lineTo(a.x, b.y);
+    }
+    ctx.lineTo(b.x, b.y);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** 线段相交检测（仅检测水平与垂直段相交） */
+function segmentIntersection(s1, s2) {
+  const h1 = s1.a.y === s1.b.y; // s1 是否水平
+  const h2 = s2.a.y === s2.b.y; // s2 是否水平
+  if (h1 === h2) return null;   // 同向不交叉（忽略共线）
+
+  const horz = h1 ? s1 : s2;
+  const vert = h1 ? s2 : s1;
+
+  const hx1 = Math.min(horz.a.x, horz.b.x), hx2 = Math.max(horz.a.x, horz.b.x);
+  const vy1 = Math.min(vert.a.y, vert.b.y), vy2 = Math.max(vert.a.y, vert.b.y);
+  const hx = vert.a.x, vy = horz.a.y;
+
+  if (hx > hx1 && hx < hx2 && vy > vy1 && vy < vy2) {
+    return { x: hx, y: vy };
+  }
+  return null;
+}
+
+/** 判断两个导线是否共享端点（在同一网格点连接） */
+function wiresShareEndpoint(segsA, segsB, gs) {
+  const epsA = new Set();
+  for (const seg of segsA) {
+    epsA.add(`${Math.round(seg.a.x / gs)},${Math.round(seg.a.y / gs)}`);
+    epsA.add(`${Math.round(seg.b.x / gs)},${Math.round(seg.b.y / gs)}`);
+  }
+  for (const seg of segsB) {
+    if (epsA.has(`${Math.round(seg.a.x / gs)},${Math.round(seg.a.y / gs)}`)) return true;
+    if (epsA.has(`${Math.round(seg.b.x / gs)},${Math.round(seg.b.y / gs)}`)) return true;
+  }
+  return false;
+}
+
+/** 绘制导线连接点和交叉装饰 */
+function drawWireDecorations(ctx, wireSegments, gs) {
+  // 1. 收集所有端点（含折点），检测多线交汇
+  const endpointMap = new Map(); // key -> [{wireIdx, segIdx, isEndpoint}]
+  const allSegments = [];        // {a, b, wireIdx, segIdx}
+
+  wireSegments.forEach(({ comp, segs }, wIdx) => {
+    segs.forEach((seg, sIdx) => {
+      allSegments.push({ ...seg, wireIdx: wIdx, segIdx: sIdx });
+    });
+  });
+
+  // 2. 绘制所有导线端点圆点
+  ctx.fillStyle = '#333';
+  wireSegments.forEach(({ comp, segs }) => {
+    // 起点
+    const sx = comp.xGrid * gs, sy = comp.yGrid * gs;
+    ctx.beginPath(); ctx.arc(sx, sy, 3.5, 0, Math.PI * 2); ctx.fill();
+    // 终点
+    const ex = comp.x2Grid * gs, ey = comp.y2Grid * gs;
+    ctx.beginPath(); ctx.arc(ex, ey, 3.5, 0, Math.PI * 2); ctx.fill();
+    // 弯曲节点
+    if (comp.bendPoints) {
+      comp.bendPoints.forEach(bp => {
+        ctx.beginPath();
+        ctx.arc(bp.xGrid * gs, bp.yGrid * gs, 3.5, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    }
+  });
+
+  // 3. 检测线段交叉：不同导线且不共享端点 → 画跨越弧
+  const drawnCrossings = new Set();
+  for (let i = 0; i < allSegments.length; i++) {
+    for (let j = i + 1; j < allSegments.length; j++) {
+      if (allSegments[i].wireIdx === allSegments[j].wireIdx) continue;
+      const pt = segmentIntersection(allSegments[i], allSegments[j]);
+      if (!pt) continue;
+
+      const key = `${Math.round(pt.x)},${Math.round(pt.y)}`;
+      if (drawnCrossings.has(key)) continue;
+
+      // 检查是否共享端点（共享端点 = 连接点，不是交叉）
+      const segsA = wireSegments[allSegments[i].wireIdx].segs;
+      const segsB = wireSegments[allSegments[j].wireIdx].segs;
+      if (wiresShareEndpoint(segsA, segsB, gs)) continue;
+
+      drawnCrossings.add(key);
+      // 在交叉点画小半圆弧表示跨越（画在垂直线段上）
+      const seg = allSegments[i].a.y === allSegments[i].b.y ? allSegments[j] : allSegments[i];
+      const isVert = seg.a.x === seg.b.x;
+      ctx.save();
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 3.5;
+      ctx.beginPath();
+      if (isVert) {
+        ctx.arc(pt.x, pt.y, 5, -Math.PI / 2, Math.PI / 2, false);
+      } else {
+        ctx.arc(pt.x, pt.y, 5, 0, Math.PI, false);
+      }
+      ctx.stroke();
+      // 重绘底层线段被遮盖的部分
+      ctx.strokeStyle = '#333';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      if (isVert) {
+        ctx.arc(pt.x, pt.y, 5, -Math.PI / 2, Math.PI / 2, false);
+      } else {
+        ctx.arc(pt.x, pt.y, 5, 0, Math.PI, false);
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+}
+
 // ======== 坐标工具 ========
-/** 将 canvas 像素坐标转换为引擎网格坐标（减去内边距偏移） */
+/** 将 canvas 像素坐标转换为引擎网格坐标（减去内边距和画布平移偏移） */
 function pixelToGrid(px, py) {
   const gs = gridSize.value;
   return {
-    xGrid: Math.round((px - CANVAS_PADDING) / gs),
-    yGrid: Math.round((py - CANVAS_PADDING) / gs),
+    xGrid: Math.round((px - CANVAS_PADDING - offsetX) / gs),
+    yGrid: Math.round((py - CANVAS_PADDING - offsetY) / gs),
   };
 }
 
@@ -413,9 +648,15 @@ function pixelToGrid(px, py) {
 function onMouseMove(e) {
   if (!canvas.value) return;
   const rect = canvas.value.getBoundingClientRect();
-  // 坐标已与 canvas 分辨率匹配（resizeCanvas 保持同步）
   currentMouseX = e.clientX - rect.left;
   currentMouseY = e.clientY - rect.top;
+
+  // 右键拖拽平移
+  if (isPanning) {
+    offsetX = panStartOffsetX + (currentMouseX - panStartX);
+    offsetY = panStartOffsetY + (currentMouseY - panStartY);
+    return;
+  }
 
   const { xGrid, yGrid } = pixelToGrid(currentMouseX, currentMouseY);
 
@@ -451,30 +692,33 @@ function detectPinHover() {
   const gs = gridSize.value;
   let found = false;
 
+  // ---- 先检测元件引脚 ----
   for (const comp of components) {
     if (comp.type === 'wire') continue;
     const pins = getActualPins(comp, gs);
+    const pinDefs = getComponentPins(gs)[comp.type] || [];
     for (let i = 0; i < pins.length; i++) {
       const pin = pins[i];
-      // 转换到 canvas 坐标（匹配 ctx.translate 偏移）
-      const cx = pin.x + CANVAS_PADDING;
-      const cy = pin.y + CANVAS_PADDING;
+      const cx = pin.x + CANVAS_PADDING + offsetX;
+      const cy = pin.y + CANVAS_PADDING + offsetY;
       const dist = Math.hypot(currentMouseX - cx, currentMouseY - cy);
       if (dist < 12) {
-        // 构造电压键
         const key = `${snap_(pin.x)},${snap_(pin.y)}`;
         const v = simEngine.getVoltage(key);
-        const compLabel = (labels[comp.type] || comp.type) + (comp.id ? ` (${comp.id})` : '');
-        // 计算电流（通过电压/电阻近似）
+        const pinLabel = pinDefs[i]?.label || '';
+        const compLabel = (labels[comp.type] || comp.type) + (comp.id ? ` (${comp.id})` : '') + (pinLabel ? ` [${pinLabel}]` : '');
+        // 计算电流：对两端元件用欧姆定律
         let current = '--';
-        if (comp.value && comp.type === 'resistor') {
-          const pins2 = getActualPins(comp, gs);
-          if (pins2.length >= 2) {
-            const k1 = `${snap_(pins2[0].x)},${snap_(pins2[0].y)}`;
-            const k2 = `${snap_(pins2[pins2.length - 1].x)},${snap_(pins2[pins2.length - 1].y)}`;
-            const v1 = simEngine.getVoltage(k1);
-            const v2 = simEngine.getVoltage(k2);
-            current = (Math.abs(v1 - v2) / comp.value * 1000).toFixed(2);
+        if (pins.length >= 2 && comp.value) {
+          const k1 = `${snap_(pins[0].x)},${snap_(pins[0].y)}`;
+          const k2 = `${snap_(pins[pins.length - 1].x)},${snap_(pins[pins.length - 1].y)}`;
+          const v1 = simEngine.getVoltage(k1);
+          const v2 = simEngine.getVoltage(k2);
+          const vDiff = Math.abs(v1 - v2);
+          if (comp.type === 'resistor' || comp.type === 'bulb') {
+            current = (vDiff / comp.value * 1000).toFixed(2);
+          } else if (comp.type === 'diode') {
+            current = vDiff > 0.6 ? ((vDiff - 0.6) / 10 * 1000).toFixed(2) : '0.00';
           }
         }
 
@@ -489,6 +733,41 @@ function detectPinHover() {
       }
     }
     if (found) break;
+  }
+
+  // ---- 再检测导线端点 ----
+  if (!found) {
+    for (const comp of components) {
+      if (comp.type !== 'wire') continue;
+      const endpoints = [
+        { x: comp.xGrid * gs, y: comp.yGrid * gs, label: '端点A' },
+        { x: comp.x2Grid * gs, y: comp.y2Grid * gs, label: '端点B' },
+      ];
+      // 也检查弯曲节点
+      if (comp.bendPoints) {
+        comp.bendPoints.forEach((bp, idx) => {
+          endpoints.push({ x: bp.xGrid * gs, y: bp.yGrid * gs, label: `拐点${idx + 1}` });
+        });
+      }
+      for (const ep of endpoints) {
+        const cx = ep.x + CANVAS_PADDING + offsetX;
+        const cy = ep.y + CANVAS_PADDING + offsetY;
+        const dist = Math.hypot(currentMouseX - cx, currentMouseY - cy);
+        if (dist < 12) {
+          const key = `${snap_(ep.x)},${snap_(ep.y)}`;
+          const v = simEngine.getVoltage(key);
+          pinInfo.visible = true;
+          pinInfo.x = currentMouseX + 15;
+          pinInfo.y = currentMouseY - 10;
+          pinInfo.compLabel = `导线 ${ep.label}`;
+          pinInfo.voltage = v.toFixed(3);
+          pinInfo.current = '--'; // 导线电流需支路分析
+          found = true;
+          break;
+        }
+      }
+      if (found) break;
+    }
   }
 
   if (!found) {
@@ -518,21 +797,22 @@ function onCanvasClick(e) {
     const { xGrid, yGrid } = pixelToGrid(currentMouseX, currentMouseY);
     for (let i = components.length - 1; i >= 0; i--) {
       const c = components[i];
-      if (c.xGrid === xGrid && c.yGrid === yGrid) {
-        // 检查是否匹配：元件匹配中心坐标，导线匹配任意端点
-        let isMatch = true;
-        if (c.type === 'wire') {
-          isMatch = (c.xGrid === xGrid && c.yGrid === yGrid) ||
-                    (c.x2Grid === xGrid && c.y2Grid === yGrid);
+      // 元件中心匹配
+      let isMatch = (c.xGrid === xGrid && c.yGrid === yGrid);
+      // 导线额外匹配端点 + 弯曲节点
+      if (!isMatch && c.type === 'wire') {
+        isMatch = (c.x2Grid === xGrid && c.y2Grid === yGrid);
+        if (!isMatch && c.bendPoints) {
+          isMatch = c.bendPoints.some(bp => bp.xGrid === xGrid && bp.yGrid === yGrid);
         }
-        if (!isMatch) continue;
-        if (c.type !== 'wire') componentRegistry.removeId(c.id);
-        const removedType = c.type;
-        components.splice(i, 1);
-        if (goalEngine) goalEngine.fireEvent('component:remove:' + removedType, { component: c });
-        if (simEngine) simEngine.reset();
-        break;
       }
+      if (!isMatch) continue;
+      if (c.type !== 'wire') componentRegistry.removeId(c.id);
+      const removedType = c.type;
+      components.splice(i, 1);
+      if (goalEngine) goalEngine.fireEvent('component:remove:' + removedType, { component: c });
+      if (simEngine) simEngine.reset();
+      break;
     }
     return;
   }
@@ -543,13 +823,10 @@ function onCanvasClick(e) {
   const { xGrid, yGrid } = pixelToGrid(currentMouseX, currentMouseY);
 
   if (selectedType.value === 'wire') {
-    // 吸附到最近的元件引脚
-    // 注意：元件引脚坐标已包含 CANVAS_PADDING 偏移在渲染中处理，
-    // 此处 pin.x/y 是引擎坐标（相对于画布原点），与 grid 计算一致
+    // 吸附到最近的元件引脚（返回 { xGrid, yGrid, isPin } ）
     const snapToPin = (xG, yG) => {
       const gs = gridSize.value;
-      let nearest = { xGrid: xG, yGrid: yG };
-      // 先尝试精确引脚吸附（阈值覆盖 1 格距离 + 余量）
+      let nearest = { xGrid: xG, yGrid: yG, isPin: false };
       let minDist = gs * 1.2;
       for (const comp of components) {
         if (comp.type === 'wire') continue;
@@ -560,12 +837,12 @@ function onCanvasClick(e) {
           const dist = Math.hypot(px - xG, py - yG);
           if (dist < minDist) {
             minDist = dist;
-            nearest = { xGrid: px, yGrid: py };
+            nearest = { xGrid: px, yGrid: py, isPin: true };
           }
         }
       }
-      // 如果未吸附到引脚，但点击位置靠近某个元件的中心，则吸附到该元件的最近引脚
-      if (nearest.xGrid === xG && nearest.yGrid === yG) {
+      // 未吸附到引脚但靠近元件中心时，吸附到最近引脚
+      if (!nearest.isPin) {
         for (const comp of components) {
           if (comp.type === 'wire') continue;
           const dist = Math.hypot((comp.xGrid || 0) - xG, (comp.yGrid || 0) - yG);
@@ -578,7 +855,7 @@ function onCanvasClick(e) {
               const d = Math.hypot(px - xG, py - yG);
               if (d < minPinDist) {
                 minPinDist = d;
-                nearest = { xGrid: px, yGrid: py };
+                nearest = { xGrid: px, yGrid: py, isPin: true };
               }
             }
             break;
@@ -588,29 +865,48 @@ function onCanvasClick(e) {
       return nearest;
     };
 
-    const snappedStart = wireStartGrid ? wireStartGrid : snapToPin(xGrid, yGrid);
-    const snappedEnd = snapToPin(xGrid, yGrid);
-
+    // 起点吸附
     if (!wireStartGrid) {
-      wireStartGrid = snappedStart;
+      const snapped = snapToPin(xGrid, yGrid);
+      wireStartGrid = snapped;
+      wireBendPoints = [];
       return;
     }
-    // 避免零长度导线
-    if (snappedStart.xGrid === snappedEnd.xGrid && snappedStart.yGrid === snappedEnd.yGrid) {
-      wireStartGrid = null;
-      return;
+
+    // 终点吸附：检测是否在元件引脚上
+    const snappedEnd = snapToPin(xGrid, yGrid);
+    const isOnPin = snappedEnd.isPin;
+
+    // 避免零长度线段
+    const lastPoint = wireBendPoints.length > 0
+      ? wireBendPoints[wireBendPoints.length - 1]
+      : wireStartGrid;
+    const sameAsLast = snappedEnd.xGrid === lastPoint.xGrid && snappedEnd.yGrid === lastPoint.yGrid;
+
+    if (!sameAsLast) {
+      if (isOnPin) {
+        // 点击在引脚上 → 自动结束布线
+        const wireComp = {
+          type: 'wire',
+          xGrid: wireStartGrid.xGrid,
+          yGrid: wireStartGrid.yGrid,
+          x2Grid: snappedEnd.xGrid,
+          y2Grid: snappedEnd.yGrid,
+        };
+        if (wireBendPoints.length > 0) {
+          wireComp.bendPoints = [...wireBendPoints];
+        }
+        components.push(wireComp);
+        wireStartGrid = null;
+        wireMouseGrid = null;
+        wireBendPoints = [];
+        if (goalEngine) goalEngine.fireEvent('component:add:wire', { component: wireComp });
+        return;
+      } else {
+        // 不在引脚上 → 添加曲折点
+        wireBendPoints.push({ xGrid: snappedEnd.xGrid, yGrid: snappedEnd.yGrid });
+      }
     }
-    const wireComp = {
-      type: 'wire',
-      xGrid: snappedStart.xGrid,
-      yGrid: snappedStart.yGrid,
-      x2Grid: snappedEnd.xGrid,
-      y2Grid: snappedEnd.yGrid,
-    };
-    components.push(wireComp);
-    wireStartGrid = null;
-    wireMouseGrid = null;
-    if (goalEngine) goalEngine.fireEvent('component:add:wire', { component: wireComp });
     return;
   }
 
@@ -618,8 +914,10 @@ function onCanvasClick(e) {
     xGrid, yGrid,
     type: selectedType.value,
     rotation: pendingRotation,
-    state: selectedType.value === 'switch' ? 'closed' : undefined,
-    value: (selectedType.value === 'resistor' || selectedType.value === 'bulb') ? 100 : undefined,
+    state: (selectedType.value === 'switch' || selectedType.value === 'fuse') ? 'closed' : undefined,
+    value: (['resistor', 'bulb', 'photoresistor', 'potentiometer', 'buzzer'].includes(selectedType.value)) ? 100
+         : (selectedType.value === 'inductor') ? 10
+         : (selectedType.value === 'capacitor') ? 100 : undefined,
     beta: (selectedType.value === 'transistor-npn' || selectedType.value === 'transistor-pnp') ? 100 : undefined,
     lit: false,
   };
@@ -632,19 +930,126 @@ function onCanvasClick(e) {
   selectedType.value = null;
 }
 
+// ======== 画布平移（右键拖拽） ========
+function onMouseDown(e) {
+  if (e.button === 2) {
+    // 右键：不在放置模式且不在连线中 → 开始平移
+    if (!selectedType.value && !isDeleteMode.value && !wireStartGrid) {
+      e.preventDefault();
+      isPanning = true;
+      panStartX = currentMouseX;
+      panStartY = currentMouseY;
+      panStartOffsetX = offsetX;
+      panStartOffsetY = offsetY;
+    }
+  }
+}
+
+function onMouseUp(e) {
+  if (e.button === 2 && isPanning) {
+    isPanning = false;
+    // 松手时吸附到网格，确保元件与背景网格对齐
+    const gs = gridSize.value;
+    offsetX = Math.round(offsetX / gs) * gs;
+    offsetY = Math.round(offsetY / gs) * gs;
+  }
+}
+
 function onRightClick(e) {
   e.preventDefault();
-  // 旋转待放置元件
-  pendingRotation = (pendingRotation + 90) % 360;
-  if (tempComponent) {
-    tempComponent.rotation = pendingRotation;
+  // 布线模式中右键：取消当前布线
+  if (wireStartGrid) {
+    wireStartGrid = null;
+    wireMouseGrid = null;
+    wireBendPoints = [];
+    return;
   }
+  // 放置元件模式下右键：旋转待放置元件
+  if (selectedType.value && selectedType.value !== 'wire') {
+    pendingRotation = (pendingRotation + 90) % 360;
+    if (tempComponent) {
+      tempComponent.rotation = pendingRotation;
+    }
+  }
+  // 否则：右键用于平移画布（由 onMouseDown/onMouseUp 处理）
 }
 
 function onMouseLeave() {
   tempComponent = null;
   wireMouseGrid = null;
   pinInfo.visible = false;
+  isPanning = false;
+  // 不清理 wireStartGrid/wireBendPoints，离开画布再回来时可继续布线
+}
+
+// ======== 滚轮缩放（Ctrl+滚轮，以鼠标为中心） ========
+function onWheel(e) {
+  if (e.ctrlKey || e.metaKey) {
+    e.preventDefault();
+    const rect = canvas.value.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const oldGS = gridSize.value;
+    const delta = e.deltaY > 0 ? -2 : 2;
+    const newGS = Math.max(10, Math.min(50, oldGS + delta));
+    if (newGS === oldGS) return;
+
+    // 鼠标在世界坐标系中的位置（缩放前）
+    const worldX = (mx - CANVAS_PADDING - offsetX) / oldGS;
+    const worldY = (my - CANVAS_PADDING - offsetY) / oldGS;
+    // 更新网格大小
+    gridSize.value = newGS;
+    // 调整偏移，使世界坐标中的同一点保持在鼠标下方
+    offsetX = mx - CANVAS_PADDING - worldX * newGS;
+    offsetY = my - CANVAS_PADDING - worldY * newGS;
+  }
+}
+
+// ======== 键盘快捷键 ========
+function onKeyDown(e) {
+  // Ctrl+S：导出电路
+  if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+    e.preventDefault();
+    exportCircuit();
+    return;
+  }
+  // Ctrl+Z：撤销
+  if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+    e.preventDefault();
+    undoLast();
+    return;
+  }
+  // Delete / Backspace：删除模式
+  if (e.key === 'Delete' || e.key === 'Backspace') {
+    // 不阻止默认（输入框中仍需正常删除），仅在画布区域生效
+    if (document.activeElement === canvas.value || document.activeElement === document.body) {
+      e.preventDefault();
+      isDeleteMode.value = !isDeleteMode.value;
+      selectedType.value = null;
+    }
+    return;
+  }
+  // R 键：旋转待放置元件
+  if (e.key === 'r' || e.key === 'R') {
+    if (document.activeElement === canvas.value || document.activeElement === document.body) {
+      e.preventDefault();
+      pendingRotation = (pendingRotation + 90) % 360;
+      if (tempComponent) {
+        tempComponent.rotation = pendingRotation;
+      }
+    }
+    return;
+  }
+  // Escape：取消当前操作
+  if (e.key === 'Escape') {
+    selectedType.value = null;
+    isDeleteMode.value = false;
+    tempComponent = null;
+    wireStartGrid = null;
+    wireMouseGrid = null;
+    wireBendPoints = [];
+    pendingRotation = 0;
+  }
 }
 
 function undoLast() {
@@ -783,6 +1188,22 @@ function drawOscilloscope() {
 
 // 监听示波器开关 + 通道变化
 import { watch } from 'vue';
+
+// 网格大小变化时同步仿真引擎（修复电压键不匹配 bug）
+watch(gridSize, (newSize) => {
+  if (simEngine) {
+    simEngine.GRID_SIZE = newSize;
+    simEngine.reset();
+    // 清空电压历史（坐标键已随 gridSize 改变）
+    for (const key of Object.keys(voltageHistory)) {
+      delete voltageHistory[key];
+    }
+    _prevCircuitInfoJson = '';
+    // 通知目标引擎重建
+    if (goalEngine) goalEngine.fireEvent('grid:changed', { gridSize: newSize });
+  }
+});
+
 watch(showOscilloscope, (val) => {
   if (val) {
     nextTick(() => {
@@ -811,7 +1232,11 @@ onBeforeUnmount(() => {
     canvas.value.removeEventListener('click', onCanvasClick);
     canvas.value.removeEventListener('contextmenu', onRightClick);
     canvas.value.removeEventListener('mouseleave', onMouseLeave);
+    canvas.value.removeEventListener('wheel', onWheel);
+    canvas.value.removeEventListener('mousedown', onMouseDown);
   }
+  window.removeEventListener('mouseup', onMouseUp);
+  window.removeEventListener('keydown', onKeyDown);
 });
 
 </script>
@@ -967,12 +1392,20 @@ onBeforeUnmount(() => {
   width: 120px;
   accent-color: #1976d2;
 }
-.grid-control .save-hint {
+.grid-control .save-hint,
+.grid-control .status-hint {
   margin-left: auto;
   font-size: 11px;
   color: #aaa;
   cursor: default;
   user-select: none;
+}
+.status-hint {
+  color: #999;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ---- 引脚信息提示 ---- */

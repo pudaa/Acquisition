@@ -122,9 +122,9 @@ export function solveLinearSystem(A, B) {
 export function solveCircuit(components, GRID_SIZE, state = {}, dt = 1e-3, onCircuitInfo) {
   const { nodes, edges, nodeKeyMap, compIdMap } = getAllNodesAndEdges(components, GRID_SIZE, onCircuitInfo);
   if (!nodes.length) {
-    // 无节点时确保灯泡 lit 归零
+    // 无节点时确保灯泡/蜂鸣器 lit 归零
     for (const comp of components) {
-      if (comp.type === 'bulb') comp.lit = false;
+      if (comp.type === 'bulb' || comp.type === 'buzzer') comp.lit = false;
     }
     return { voltages: [], state };
   }
@@ -189,10 +189,10 @@ export function solveCircuit(components, GRID_SIZE, state = {}, dt = 1e-3, onCir
   }
 
   if (batteryNodes.length === 0 || groundNodes.length === 0) {
-    // 电路无电源或地线，清空电压状态，重置所有灯泡
+    // 电路无电源或地线，清空电压状态，重置所有灯泡/蜂鸣器
     state.lastV = {};
     for (const comp of components) {
-      if (comp.type === 'bulb') comp.lit = false;
+      if (comp.type === 'bulb' || comp.type === 'buzzer') comp.lit = false;
     }
     return { voltages: [], state };
   }
@@ -240,7 +240,10 @@ export function solveCircuit(components, GRID_SIZE, state = {}, dt = 1e-3, onCir
 
       switch (comp.type) {
         case 'resistor':
-        case 'bulb': {
+        case 'bulb':
+        case 'photoresistor':
+        case 'potentiometer':
+        case 'buzzer': {
           const R = Math.max(comp.value || 1, 1e-3);
           const g = 1 / R;
           G[ia][ia] += g; G[ib][ib] += g;
@@ -253,7 +256,8 @@ export function solveCircuit(components, GRID_SIZE, state = {}, dt = 1e-3, onCir
           G[ia][ib] -= 1e4; G[ib][ia] -= 1e4;
           break;
         }
-        case 'switch': {
+        case 'switch':
+        case 'fuse': {
           const R = (comp.state === 'closed') ? 0.01 : 1e9;
           const g = 1 / R;
           G[ia][ia] += g; G[ib][ib] += g;
@@ -481,9 +485,9 @@ export function solveCircuit(components, GRID_SIZE, state = {}, dt = 1e-3, onCir
     state.indI[lKey] = (state.indI[lKey] || 0) + (dt / L) * vL;
   }
 
-  // ---- 更新灯泡发光状态 ----
+  // ---- 更新灯泡/蜂鸣器发光状态 ----
   for (const comp of components) {
-    if (comp.type !== 'bulb') continue;
+    if (comp.type !== 'bulb' && comp.type !== 'buzzer') continue;
     const pins = getActualPins(comp, GRID_SIZE);
     const idxA = compIdMap.get(nodeKeyMap.get(`${snap(pins[0].x, GRID_SIZE)},${snap(pins[0].y, GRID_SIZE)}`));
     const idxB = compIdMap.get(nodeKeyMap.get(`${snap(pins[1].x, GRID_SIZE)},${snap(pins[1].y, GRID_SIZE)}`));
@@ -499,9 +503,15 @@ export function solveCircuit(components, GRID_SIZE, state = {}, dt = 1e-3, onCir
   const result = Array(nodes.length).fill(0);
   activeNetIds.forEach((netId, i) => { result[netId] = V[i]; });
 
-  // 保存状态
+  // 保存状态：为所有原始节点键填入电压
+  // （并查集合并后多个坐标指向同一 net，需全部填充才能支持任意引脚查询）
   state.lastV = {};
-  activeNetIds.forEach((netId, i) => { state.lastV[nodes[netId]] = V[i]; });
+  for (const [key, nodeId] of nodeKeyMap.entries()) {
+    const netId = compIdMap.get(nodeId);
+    if (netId != null && netId2idx.has(netId)) {
+      state.lastV[key] = V[netId2idx.get(netId)];
+    }
+  }
 
   return { voltages: result, state };
 }
