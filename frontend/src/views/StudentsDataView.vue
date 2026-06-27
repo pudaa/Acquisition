@@ -302,7 +302,7 @@ export default {
 </script>
 
 <style scoped>
-@import "@/assets/css/experiment.css";
+
 
 .filter-bar {
     padding: 1rem;

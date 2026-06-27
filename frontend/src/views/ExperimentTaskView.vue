@@ -191,5 +191,5 @@ export default {
 </script>
 
 <style scoped>
-    @import "@/assets/css/experiment.css";
+
 </style>

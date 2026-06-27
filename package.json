@@ -1,5 +1,10 @@
 {
+  "scripts": {
+    "dev": "concurrently -n BE,FE -c blue,green \"cd backend && node app.js\" \"cd frontend && npm run dev\"",
+    "dev:all": ".\\dev.bat"
+  },
   "dependencies": {
+    "concurrently": "^9.1.0",
     "jspdf-autotable": "^5.0.2"
   }
 }

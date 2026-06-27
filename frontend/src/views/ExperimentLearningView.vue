@@ -471,8 +471,6 @@ export default {
 </script>
 
 <style scoped>
-@import '@/assets/css/home.css';
-
 #guide-container {
     position: fixed;
     z-index: 10000;

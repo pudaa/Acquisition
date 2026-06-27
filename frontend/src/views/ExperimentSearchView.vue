@@ -153,6 +153,3 @@ export default {
 }
 </style>
 
-<style>
-@import '@/assets/css/experiment.css';
-</style>

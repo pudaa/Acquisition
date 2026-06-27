@@ -302,7 +302,6 @@ export default {
 </script>
 
 <style scoped>
-@import "@/assets/css/experiment.css";
 
 .student-list {
   width: 98%;
