@@ -2,6 +2,7 @@
 **/dist/
 **/coverage/
 Acquisition.zip
-frontend/public/frontend/
+数据库文件.sql
 backend/.env
 **/*.pem
+frontend/public/frontend/
