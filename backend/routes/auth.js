@@ -1,5 +1,6 @@
 import express from 'express';
 import { User } from '../models/User.js';
+import { db } from '../config/db.js';
 import jwt from 'jsonwebtoken';
 import multer from 'multer';
 import path from 'path';
@@ -54,11 +55,19 @@ router.post('/login', async (req, res) => {
             role: user.role,
             realname: user.realname,
             username: user.username,
-            class_name: user.class_name
+            class_name: user.class_name,
+            class_id: user.class_id ?? null
         },
         process.env.JWT_SECRET,
         { expiresIn: '24h' }
     );
+    
+    // 查询班级名称（通过 classes 表）
+    let className = user.class_name;
+    if (user.class_id) {
+      const [cls] = await db.query('SELECT name FROM classes WHERE id = ?', [user.class_id]);
+      if (cls) className = cls.name;
+    }
     
     res.json({ 
         token,
@@ -68,7 +77,8 @@ router.post('/login', async (req, res) => {
             role: user.role,
             realname: user.realname,
             avatar: user.avatar_url,
-            class_name: user.class_name
+            class_name: className,
+            class_id: user.class_id ?? null
         }
     });
   } catch (error) {

@@ -207,7 +207,7 @@ export default {
     // 过滤逻辑
     const filteredStudents = computed(() => {
       return students.value.filter(s => 
-        (s.class_name === user.value.class_name) &&
+        (s.class_id === user.value.class_id) &&
         (
           s.realname.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
           s.username?.includes(searchQuery.value)

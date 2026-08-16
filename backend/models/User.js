@@ -18,7 +18,7 @@ export class User {
   // 修改注册方法
   static async register(username, password, realname) {
     const hashedPassword = await bcrypt.hash(password, 10);
-    const sql = 'INSERT INTO users (username, password, realname, role, avatar_url, class_name) VALUES (?, ?, ?, "student", "default_avatar.jpg", "no_class")';
+    const sql = 'INSERT INTO users (username, password, realname, role, avatar_url, class_name, class_id) VALUES (?, ?, ?, "student", "default_avatar.jpg", "no_class", NULL)';
     const result = await db.query(sql, [username, hashedPassword, realname]);
     if (result.affectedRows !== 1) {
       throw new Error('用户插入失败');
@@ -71,49 +71,34 @@ export class User {
     await db.query(sql, [hashedPassword, userId]);
   }
 
-  // 根据班级查找学生
-  static async findByClass(className) {
-    let rows = []
-    if(className != "no_class"){
-      const sql = 'SELECT id, username, realname, avatar_url FROM users WHERE role = "student" AND class_name = ?';
-      rows = await db.query(sql, [className]);
-    }
-    return rows;
+  // 根据班级 ID 查找学生
+  static async findByClassId(classId) {
+    if (!classId) return [];
+    const sql = 'SELECT id, username, realname, avatar_url FROM users WHERE role = "student" AND class_id = ?';
+    return await db.query(sql, [classId]);
   }
 
-  // 修改学生的班级
-  static async updateStudentClass(studentId, className) {
-    // 判断学生是否已有班级（即学生的class_name不为no_class）
-    const sql_s = 'SELECT class_name FROM users WHERE username = ? AND role = "student"';
+  // 修改学生的班级（按班级 ID）
+  static async updateStudentClass(studentId, classId) {
+    // 判断学生是否已有班级（即学生的 class_id 不为 NULL）
+    const sql_s = 'SELECT class_id FROM users WHERE username = ? AND role = "student"';
     const result = await db.query(sql_s, [studentId]);
     if (result.length === 0) {
       return;
     }
-    const currentClass = result[0].class_name;
-    if (currentClass != 'no_class') {
+    const currentClassId = result[0].class_id;
+    if (currentClassId != null) {
       return;
     }
 
-    const sql_u = 'UPDATE users SET class_name = ? WHERE username = ? AND role = "student"';
-    return await db.query(sql_u, [className, studentId]);
+    const sql_u = 'UPDATE users SET class_id = ? WHERE username = ? AND role = "student"';
+    return await db.query(sql_u, [classId, studentId]);
   }
 
-  // 将学生从班级移除
-  static async removeStudentFromClass(studentId, className) {
-    const sql = 'UPDATE users SET class_name = "no_class" WHERE username = ? AND class_name = ? AND role = "student"';
-    return await db.query(sql, [studentId, className]);
-  }
-
-  // 修改教师的班级名
-  static async updateTeacherClass(userId, newClassName) {
-    const sql = 'UPDATE users SET class_name = ? WHERE id = ? AND role = "teacher"';
-    return await db.query(sql, [newClassName, userId]);
-  }
-
-  // 批量更新指定班级的学生的 class_name
-  static async updateStudentClassByOldClass(oldClassName, newClassName) {
-    const sql = 'UPDATE users SET class_name = ? WHERE role = "student" AND class_name = ?';
-    return await db.query(sql, [newClassName, oldClassName]);
+  // 将学生从班级移除（按班级 ID）
+  static async removeStudentFromClass(studentId, classId) {
+    const sql = 'UPDATE users SET class_id = NULL WHERE username = ? AND class_id = ? AND role = "student"';
+    return await db.query(sql, [studentId, classId]);
   }
 
 }

@@ -14,6 +14,7 @@ router.get('/students', auth, async (req, res) => {
             u.username,
             u.realname,
             u.class_name,
+            u.class_id,
             COALESCE(AVG(ue.progress), 0) AS average_progress 
             FROM users u
             LEFT JOIN user_experiments ue ON u.id = ue.user_id

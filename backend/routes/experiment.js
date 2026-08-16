@@ -3,8 +3,11 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import express from 'express';
+import { fileURLToPath } from 'url';
 import { db } from '../config/db.js';
 import auth from '../middleware/auth.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 
 const coverStorage = multer.diskStorage({

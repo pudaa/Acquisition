@@ -1,6 +1,9 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
 import authRouter from './routes/auth.js';
 import experimentRoutes from './routes/experiment.js';
 import analysisRouter from './routes/analysis.js'
@@ -11,6 +14,7 @@ import classRouter from './routes/class.js';
 import aiRouter from './routes/ai.js';
 dotenv.config();
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 
 // 中间件
@@ -28,6 +32,29 @@ app.use('/api/practice', practice);
 app.use('/api/class', classRouter);
 app.use('/api/correction-notebook', practice);
 app.use('/api/ai', aiRouter);
+
+// ===== 静态托管（单端口对外：后端同时承接页面与 API）=====
+const publicDir = path.resolve(__dirname, '../frontend/public'); // 动态上传内容（封面/头像/实验文件等）
+const distDir = path.resolve(__dirname, '../frontend/dist');     // 前端构建产物
+const hasBuild = fs.existsSync(path.join(distDir, 'index.html'));
+
+// 1. 动态上传内容优先（构建后新上传的文件只存在于 public/，不在 dist/ 中）
+app.use(express.static(publicDir));
+
+if (hasBuild) {
+  // 2. 前端构建产物（index.html + static/ 等）
+  app.use(express.static(distDir));
+  // 3. SPA 回退：其余 GET 请求返回 index.html（hash 路由下主要用于根路径）
+  app.use((req, res, next) => {
+    if (req.method === 'GET' && !req.path.startsWith('/api')) {
+      return res.sendFile(path.join(distDir, 'index.html'));
+    }
+    next();
+  });
+  console.log(`[静态托管] 已启用前端构建产物: ${distDir}`);
+} else {
+  console.log('[静态托管] 未检测到前端构建产物（frontend/dist），仅提供 API 服务');
+}
 
 // 启动服务器
 const PORT = process.env.PORT || 5550;

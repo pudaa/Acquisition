@@ -1,16 +1,5 @@
 <template>
     <div class="experiment-learning">
-        <div position="relative">
-            <div id="guide-container" :style="{ display: showGuide ? 'none':'block'}">
-                <iframe 
-                    id="guide-iframe" 
-                    class="guideIframe"
-                    src="/introduction/实验引导.html" 
-                    title="操作引导动画"
-                    @load="onGuideLoad"
-                ></iframe>
-            </div>
-        </div>
         <div class="top-bar" v-if="!showIntroPanel">
             <div class="back-button" @click="confirmLeave">
                 <div class="back-btn-icon">
@@ -21,7 +10,7 @@
             <div class="experiment-title">
                 <span>{{ experiment_title }}</span>
             </div>
-            <button class="help-button" @click="toggleGuide">?</button>
+            <button class="help-button" @click="toggleGuide" title="操作引导">?</button>
         </div>
 
         <div class="learning-img">
@@ -105,7 +94,14 @@
         <ExperimentIntroductionPanel
             v-if="showIntroPanel"
             :expId="expId"
-            @close="showIntroPanel = false"
+            @close="onIntroPanelClose"
+        />
+
+        <!-- 交互式操作引导（driver.js） -->
+        <ExperimentGuide
+            ref="guideRef"
+            :engine-ref="engineRef"
+            @finished="onGuideFinished"
         />
     </div>
 </template>
@@ -119,8 +115,10 @@ import AIChatWindow from '@/components/AIChatWindow.vue';
 import PracticePanel from '../components/PracticePanel.vue';
 import ExperimentIntroductionPanel from '../components/ExperimentIntroductionPanel.vue';
 import ExperimentEngine from '../components/ExperimentEngine.vue';
+import ExperimentGuide from '../components/ExperimentGuide.vue';
 
 const engineRef = ref(null);
+const guideRef = ref(null);
 const route = useRoute();
 const router = useRouter();
 
@@ -137,7 +135,6 @@ const startTime = ref(null);
 const goals = ref([]);
 const showChatWindow = ref(false);
 const showIntroPanel = ref(true);
-const showGuide = ref(true);
 const aiScreenshotUrl = ref(null);
 const iframeData = ref(null);
 const behaviorlogs = ref(null);
@@ -149,11 +146,6 @@ onMounted(() => {
     startTime.value = new Date().toISOString();
     loadExperimentConfig(expId);
 });
-
-// 引导框加载
-function onGuideLoad() {
-    const iframe = document.getElementById('guide-iframe');
-}
 
 // ======== 实验配置加载 ========
 async function loadExperimentConfig(id) {
@@ -404,28 +396,30 @@ function handleAIAssistantClick() {
     showChatWindow.value = true;
 }
 
+// 点击 "?" 按钮：随时重新触发操作引导
 function toggleGuide() {
-    showGuide.value = !showGuide.value;
+    guideRef.value?.start();
 }
-function hideGuide() {
-    showGuide.value = !showGuide.value;
+
+// 简介弹窗关闭：首次进入时自动触发操作引导
+function onIntroPanelClose() {
+    showIntroPanel.value = false;
+    const guideKey = `guide_done_${expId}`;
+    if (!localStorage.getItem(guideKey)) {
+        setTimeout(() => {
+            guideRef.value?.start();
+        }, 300);
+    }
+}
+
+// 引导完成：记录到 localStorage，避免下次进入重复弹出
+function onGuideFinished() {
+    const guideKey = `guide_done_${expId}`;
+    localStorage.setItem(guideKey, '1');
 }
 </script>
 
 <style scoped>
-#guide-container {
-    position: fixed;
-    z-index: 10000;
-    width: 100%;
-    height: 100%;
-    display: none; 
-}
-.guideIframe {
-    width: 100vw;
-    height: 100vh;
-    border: none;
-    object-fit: cover;
-}
 .learning-container {
     display: flex;
     flex-direction: column;

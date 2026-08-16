@@ -21,6 +21,7 @@ const auth = (req, res, next) => {
             realname: decoded.realname,
             username: decoded.username,
             class_name: decoded.class_name,
+            class_id: decoded.class_id ?? null,
         };
         next();
     } catch (err) {

@@ -1,8 +1,12 @@
 import axios from 'axios';
 
+// 开发模式：Vite dev server(5173) 直连后端(5550)
+// 生产模式：后端同时托管页面与 API，使用同源相对路径（对外只需转发一个端口）
+const API_BASE = import.meta.env.DEV ? 'http://localhost:5550/api' : '/api';
+
 // 创建可复用的axios实例
 const api = axios.create({
-    baseURL: 'http://localhost:5550/api',// http://localhost:5550/api
+    baseURL: API_BASE,
     headers: {
         'Content-Type': 'application/json'
     },

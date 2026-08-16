@@ -51,7 +51,7 @@
         realname: realname.value  // 添加姓名参数
       });
   
-      if (response.data.success !== 201) {
+      if (response.data.code !== 201) {
         throw new Error(response.data.error || '注册失败');
       }
       // alert('注册成功');

@@ -38,11 +38,11 @@ router.get('/topics', auth, async (req, res) => {
 // 新建话题
 router.post('/topics', auth, async (req, res) => {
   try {
-    const { title, content, authorId, class_name} = req.body;
+    const { title, content, authorId, class_id } = req.body;
     if (!title || !content) return res.status(400).json({ error: '标题和内容不能为空' });
     await db.query(
-      'INSERT INTO discussion_topics (title, content, author_id,class_name) VALUES (?, ?, ?, ?)',
-      [title, content, authorId, class_name]
+      'INSERT INTO discussion_topics (title, content, author_id, class_id) VALUES (?, ?, ?, ?)',
+      [title, content, authorId, class_id ?? null]
     );
     res.json({ message: '发布成功' });
   } catch (err) {

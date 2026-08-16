@@ -23,7 +23,7 @@
       </div>
       <div class="form-group">
         <label>班级：</label>
-        <input :value="user?.class_name || '没有班级'" type="text" disabled />
+        <input :value="user?.class_id ? (user?.class_name || '未命名班级') : '未加入班级'" type="text" disabled />
       </div>
       <div class="form-group">
         <label>重置密码：</label>

@@ -56,7 +56,7 @@
     <div v-if="showCreateModal" class="modal-mask">
       <div class="modal-container">
 
-        <div v-if = "user.class_name === 'no_class' && currentTab === 'class'">
+        <div v-if = "!user.class_id && currentTab === 'class'">
           <h3>请先加入班级才能在班级讨论区发帖。</h3>
           <div class="modal-actions1">
            <button @click="showCreateModal = false">关闭</button>
@@ -92,9 +92,9 @@ const searchQuery = ref('');
 const expandedTopics = ref({});
 
 
-// 当前tab和班级名（假设user.class_name有值，否则请替换为实际字段）
+// 当前tab和班级ID（user.class_id 为 null 表示未加入班级）
 const currentTab = ref('general'); // 'general' or 'class'
-const userClass = user.value.class_name;
+const userClassId = user.value.class_id ?? null;
 
 const switchTab = (tab) => {
   currentTab.value = tab;
@@ -115,14 +115,14 @@ const fetchTopics = async () => {
 
 const createTopic = async () => {
   if (!newTopic.value.title.trim() || !newTopic.value.content.trim()) return;
-  // 根据当前tab设置class_name
-  const class_name = currentTab.value === 'general' ? 'public' : userClass;
+  // 根据当前tab设置class_id（综合讨论区为 null，班级讨论区为当前班级ID）
+  const class_id = currentTab.value === 'general' ? null : userClassId;
   try {
     await api.post('/discussion/topics', {
       title: newTopic.value.title,
       content: newTopic.value.content,
       authorId: user.value.id,
-      class_name: class_name
+      class_id: class_id
     });
     showCreateModal.value = false;
     newTopic.value = { title: '', content: '' };
@@ -197,8 +197,8 @@ const filteredTopics = computed(() => {
   // 先按tab筛选
   let list = topics.value.filter(t =>
     currentTab.value === 'general'
-      ? t.class_name === 'public'
-      : t.class_name === userClass
+      ? t.class_id == null
+      : t.class_id === userClassId
   );
   // 再按搜索
   if (searchQuery.value.trim()) {

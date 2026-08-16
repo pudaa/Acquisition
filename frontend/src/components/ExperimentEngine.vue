@@ -1,7 +1,7 @@
 ﻿<template>
-  <div class="engine-container" ref="container">
+  <div class="engine-container" ref="container" data-guide="engine-container">
     <!-- 左侧工具栏（加大+可滚动） -->
-    <div class="engine-sidebar">
+    <div class="engine-sidebar" data-guide="sidebar">
       <div class="sidebar-header">元件</div>
       <div class="sidebar-components">
         <button
@@ -10,6 +10,8 @@
           :class="['sidebar-btn', { active: selectedType === comp }]"
           @click="selectComponent(comp)"
           :title="getLabel(comp)"
+          :data-guide="'component-btn'"
+          :data-type="comp"
         >
           <img :src="getIconUrl(comp)" class="sidebar-icon" />
           <span class="sidebar-label">{{ getLabel(comp) }}</span>
@@ -17,15 +19,15 @@
       </div>
       <div class="sidebar-divider"></div>
       <div class="sidebar-actions">
-        <button class="sidebar-btn" @click="undoLast" title="撤销">
+        <button class="sidebar-btn" @click="undoLast" title="撤销" data-guide="undo">
           <span class="sidebar-icon" style="font-size:22px;">↩</span>
           <span class="sidebar-label">撤销</span>
         </button>
-        <button class="sidebar-btn" @click="toggleDelete" :class="{ active: isDeleteMode }" title="删除">
+        <button class="sidebar-btn" @click="toggleDelete" :class="{ active: isDeleteMode }" title="删除" data-guide="delete">
           <span class="sidebar-icon" style="font-size:22px;">🗑</span>
           <span class="sidebar-label">删除</span>
         </button>
-        <button class="sidebar-btn" @click="showOscilloscope = !showOscilloscope" :class="{ active: showOscilloscope }" title="示波器">
+        <button class="sidebar-btn" @click="showOscilloscope = !showOscilloscope" :class="{ active: showOscilloscope }" title="示波器" data-guide="oscilloscope">
           <span class="sidebar-icon">
             <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor">
               <path d="M3 3v18h18V3H3zm16 16H5V5h14v14zM7 10h2v7H7v-7zm4-3h2v10h-2V7zm4 6h2v4h-2v-4z"/>
@@ -50,10 +52,10 @@
 
     <!-- 主区域（画布四周留白） -->
     <div class="engine-main">
-      <div class="canvas-wrapper">
+      <div class="canvas-wrapper" data-guide="canvas">
         <canvas ref="canvas" class="engine-canvas" :style="{ cursor: canvasCursor }"></canvas>
       </div>
-      <div class="grid-control">
+      <div class="grid-control" data-guide="grid-control">
         <label>网格</label>
         <input type="range" min="10" max="50" v-model.number="gridSize" title="网格大小" />
         <span class="status-hint">{{ hintText }}</span>
@@ -168,6 +170,10 @@ let _prevCircuitInfoJson = '';
 defineExpose({
   /** 获取当前电路的所有元件（含预设+用户添加） */
   getComponents: () => components,
+  /** 当前选中的元件类型（引导用） */
+  selectedType,
+  /** 当前电路元件数量（引导用） */
+  componentCount: computed(() => components.length),
   /** 从保存的元件列表恢复电路（替换当前电路，保留预设ID） */
   restoreComponents: (savedComponents) => {
     if (!Array.isArray(savedComponents) || savedComponents.length === 0) return;

@@ -80,7 +80,8 @@ function cancelEditClassName() {
 
 async function fetchCurrentClassName() {
   try {
-    className.value = user.value.class_name == 'no_class' ? '' : user.value.class_name;
+    const res = await api.get('/class/info');
+    className.value = res.data.class?.name || '';
   } catch (e) {
     showMsg('获取班级名失败');
   }
@@ -103,6 +104,11 @@ async function updateClassName(newName) {
   try {
     await api.put('/class/update-classname', { newClassName: newName });
     user.value.class_name = newName;
+    // 若教师还没有班级，更新后重新拉取班级信息以获取 class_id
+    const info = await api.get('/class/info');
+    if (info.data.class) {
+      user.value.class_id = info.data.class.id;
+    }
     localStorage.setItem('user', JSON.stringify(user.value));
     className.value = newName;
     showMsg('班级名更新成功');
