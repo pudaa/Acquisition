@@ -33,7 +33,7 @@
 
 <script>
 import ExperimentReport from '@/assets/js/experiment-report.js';
-import api from '../api';
+import { aiApi } from '../api';
 
 export default {
   data() {
@@ -55,10 +55,8 @@ export default {
       console.log('AI 分析问题:', question);
 
       try {
-        const { data } = await api.post('/ai/chat', {
+        const { data } = await aiApi.post('/ai/behavior-analysis', {
           question,
-          expTitle: this.$route.query.expTitle,
-          circuitData: null,
           history: [],
         });
         this.analysisResult = data.answer || 'AI 分析失败，请稍后重试。';

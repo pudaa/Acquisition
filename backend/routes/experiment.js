@@ -2,34 +2,77 @@
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import express from 'express';
 import { fileURLToPath } from 'url';
 import { db } from '../config/db.js';
-import auth from '../middleware/auth.js';
+import auth, { requireRole } from '../middleware/auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// ============ 上传安全配置 ============
+const MAX_FILE_SIZE = 20 * 1024 * 1024; // 单文件最大 20MB
+const ALLOWED_IMAGE_EXTS = /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i;
+const ALLOWED_HTML_EXTS = /\.(html?|htm)$/i;
+const ALLOWED_RESOURCE_EXTS = /\.(html?|css|js|mjs|json|png|jpe?g|gif|svg|webp|ico|bmp|txt|md|mp3|wav|ogg|woff2?|ttf|eot|map)$/i;
+
+// 去除路径分隔符与危险字符，仅保留安全的文件名（防路径穿越）
+function safeBasename(originalname) {
+  const base = String(originalname || '').replace(/[\\/]/g, '/').split('/').pop() || 'file';
+  const cleaned = base.replace(/[^a-zA-Z0-9._\-]/g, '_');
+  return cleaned || 'file';
+}
+
+function randomNameWithExt(originalname) {
+  const ext = path.extname(safeBasename(originalname)).toLowerCase();
+  return crypto.randomUUID() + ext;
+}
 
 const coverStorage = multer.diskStorage({
     destination: function (req, file, cb) {
         cb(null, path.resolve(__dirname, '../../frontend/public/covers'));
     },
     filename: function (req, file, cb) {
-        cb(null, Date.now() + '-' + file.originalname);
+        cb(null, randomNameWithExt(file.originalname));
     }
 });
-const upload = multer({ storage: coverStorage });
+const upload = multer({
+    storage: coverStorage,
+    limits: { fileSize: MAX_FILE_SIZE },
+    fileFilter: (req, file, cb) => {
+        if (file.fieldname === 'cover') {
+            if (!ALLOWED_IMAGE_EXTS.test(file.originalname)) {
+                return cb(new Error('封面仅支持图片文件（png/jpg/gif/webp/svg等）'));
+            }
+        } else if (file.fieldname === 'htmlFile') {
+            if (!ALLOWED_HTML_EXTS.test(file.originalname)) {
+                return cb(new Error('实验主文件仅支持 HTML 文件'));
+            }
+        } else if (file.fieldname === 'resources') {
+            if (!ALLOWED_RESOURCE_EXTS.test(file.originalname)) {
+                return cb(new Error(`资源文件类型不支持：${safeBasename(file.originalname)}`));
+            }
+            // 资源文件保留原文件名（HTML 内引用依赖它），但经过安全清洗
+            file.safeName = safeBasename(file.originalname);
+        }
+        cb(null, true);
+    }
+});
+const uploadExperimentFiles = upload.fields([
+    { name: 'cover', maxCount: 1 },
+    { name: 'htmlFile', maxCount: 1 },
+    { name: 'resources', maxCount: 10 }
+]);
 
 const router = express.Router();
 router.get('/', auth, async (req, res) => {
     try {
         const { page = 1, search = '' } = req.query;
         const userId = req.user.id;
-        // 修改分页参数为数字类型
-        const pageSize = Number(req.query.pageSize) || 10;
+        // 分页参数：限制 pageSize 1~100
+        const pageSize = Math.min(Math.max(Number(req.query.pageSize) || 10, 1), 100);
         const offset = Math.max((Number(page) - 1) * pageSize, 0); // 确保非负数
-        console.log('查询参数:', pageSize, offset); // 添加日志
-        // 修改基础查询语句
+        // 基础查询语句
         const baseQuery = `
             SELECT 
                 e.exp_id AS id,
@@ -40,24 +83,29 @@ router.get('/', auth, async (req, res) => {
                 ue.is_completed
             FROM experiments e
             LEFT JOIN user_experiments ue 
-                ON ue.exp_id = e.exp_id
-            WHERE ue.user_id LIKE ? 
+                ON ue.exp_id = e.exp_id AND ue.user_id = ?
             ORDER BY e.exp_id
         `;
-        
+
         // 获取分页数据
-        // 修改主查询参数结构
         const experiments = await db.query(
             `${baseQuery} LIMIT ? OFFSET ?`,
             [
-                userId.toString(), 
-                pageSize.toString(),
-                offset.toString()
+                userId,
+                pageSize,
+                offset
             ]
         );
-        console.log('查询结果:', experiments); // 添加日志
-        // 修改总数查询参数结构
-        const total = experiments.length; 
+        // 总数查询（独立 COUNT，修正原分页总数错误）
+        const [countRow] = await db.query(
+            `SELECT COUNT(*) AS total
+             FROM experiments e
+             LEFT JOIN user_experiments ue 
+                 ON ue.exp_id = e.exp_id AND ue.user_id = ?
+             WHERE ue.user_id = ?`,
+            [userId, userId]
+        );
+        const total = countRow?.total || 0;
         const result = {
             data:  experiments,
             pagination: {
@@ -66,8 +114,7 @@ router.get('/', auth, async (req, res) => {
                 total_items: total
             }
         };
-        
-        console.log('后端响应数据:', result); // 添加响应日志
+
         res.json(result);
 
     } catch (err) {
@@ -76,18 +123,32 @@ router.get('/', auth, async (req, res) => {
     }
 });
 
-// 实验上传接口
-router.post('/upload', upload.fields([
-    { name: 'cover', maxCount: 1 },
-    { name: 'htmlFile', maxCount: 1 },
-    { name: 'resources', maxCount: 10 }
-]), async (req, res) => {
+// 实验上传接口（仅教师）
+router.post('/upload', auth, requireRole('teacher'), (req, res, next) => {
+    uploadExperimentFiles(req, res, (err) => {
+        if (err) {
+            const message = err.code === 'LIMIT_FILE_SIZE'
+                ? '文件大小超过限制（单文件最大 20MB）'
+                : (err.message || '文件上传失败');
+            return res.status(400).json({ error: message });
+        }
+        next();
+    });
+}, async (req, res) => {
     try {
         // 1. 获取表单字段
         const { title, subject, difficulty, duration, introduce, guidance, steps, element } = req.body;
         const coverFile = req.files['cover']?.[0];
         const htmlFile = req.files['htmlFile']?.[0];
         const resourceFiles = req.files['resources'] || [];
+
+        // 必填字段校验
+        if (!title || !title.trim()) {
+            return res.status(400).json({ error: '实验标题不能为空' });
+        }
+        if (!htmlFile) {
+            return res.status(400).json({ error: '实验主文件（index.html）为必填项' });
+        }
 
         // 插入数据库，获取exp_id
         const cover_url = coverFile ? '/covers/' + coverFile.filename : '';
@@ -109,12 +170,12 @@ router.post('/upload', upload.fields([
             fs.copyFileSync(htmlFile.path, path.join(expDir, 'index.html'));
         }
 
-        // 存储资源文件
+        // 存储资源文件（保留清洗后的原文件名，供 HTML 相对引用）
         if (resourceFiles.length > 0) {
             const resDir = path.resolve(__dirname, `../../frontend/public/experiments_resources/${exp_id}`);
             if (!fs.existsSync(resDir)) fs.mkdirSync(resDir, { recursive: true });
             for (const file of resourceFiles) {
-                fs.copyFileSync(file.path, path.join(resDir, file.filename));
+                fs.copyFileSync(file.path, path.join(resDir, file.safeName || safeBasename(file.originalname)));
             }
         }
 
@@ -126,7 +187,7 @@ router.post('/upload', upload.fields([
 });
 
 // 获取所有元件列表（id和name）
-router.get('/element-list', async (req, res) => {
+router.get('/element-list', auth, async (req, res) => {
   try {
     const elements = await db.query('SELECT id, name FROM elements');
     res.json({ data: elements });
@@ -136,7 +197,7 @@ router.get('/element-list', async (req, res) => {
 });
 
 // 获取元件信息（支持批量ids查询，实验简介组件用）
-router.get('/elements', async (req, res) => {
+router.get('/elements', auth, async (req, res) => {
     try {
         let ids = req.query.ids;
         if (!ids) return res.json({ data: [] });
@@ -350,7 +411,7 @@ router.get('/:expId/title', auth, async (req, res) => {
 })
 
 // 获取单个实验详细信息（实验简介组件用）
-router.get('/:expId/info', async (req, res) => {
+router.get('/:expId/info', auth, async (req, res) => {
     try {
         const { expId } = req.params;
         const [experiment] = await db.query(
@@ -391,8 +452,8 @@ router.get('/:expId/info', async (req, res) => {
     }
 });
 
-// 获取单个实验学生进度数据
-router.get('/:id/students', async (req, res) => {
+// 获取单个实验学生进度数据（仅教师）
+router.get('/:id/students', auth, requireRole('teacher'), async (req, res) => {
     try {
         const expId = req.params.id;
         const timeRange = req.query.timeRange || 'all';
@@ -427,7 +488,7 @@ router.get('/:id/students', async (req, res) => {
 });
 
 // 获取实验引擎配置（支持从 experiment_configs 表读取，无配置时返回传统模式）
-router.get('/:expId/config', async (req, res) => {
+router.get('/:expId/config', auth, async (req, res) => {
     try {
         const { expId } = req.params;
 

@@ -75,14 +75,14 @@
       <RouterView />
     </main>
 
-    <!-- AI助手悬浮按钮 -->
+    <!-- AI助手悬浮按钮（通用模式：不携带电路信息） -->
     <button 
         class="ai-assistant"
         @click="showChatWindow = !showChatWindow"
       >
     <!-- AI助手 -->
     </button>
-    <AIChatWindow v-model="showChatWindow" />
+    <AIChatWindow v-model="showChatWindow" mode="general" />
   </div>
 </template>
 

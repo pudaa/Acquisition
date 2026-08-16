@@ -9,7 +9,7 @@
     }"
   >
     <div class="chat-header" @mousedown="startDrag">
-      <span>AI 实验助手</span>
+      <span>{{ isExperimentMode ? 'AI 实验助手' : 'AI 学习助手' }}</span>
       <button @click="close">×</button>
     </div>
     
@@ -30,7 +30,7 @@
     <div class="chat-input">
       <textarea
         v-model="message"
-        placeholder="输入实验问题..."
+        :placeholder="isExperimentMode ? '输入实验问题...' : '输入你的问题...'"
         @keydown.enter.prevent="handleEnter"
       ></textarea>
       <button @click="sendMessage">发送</button>
@@ -39,8 +39,8 @@
 </template>
     
 <script setup>
-import { ref, onMounted, watch } from 'vue';
-import api from '@/api';
+import { ref, onMounted, watch, computed } from 'vue';
+import api, { aiApi } from '@/api';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 const user = ref(JSON.parse(localStorage.getItem('user') || 'null'));
@@ -76,9 +76,15 @@ const stopDrag = () => {
 
 const props = defineProps({
   modelValue: Boolean,
+  // 模式：experiment = 实验内 AI（携带电路上下文）；general = 通用 AI（无电路信息）
+  mode: {
+    type: String,
+    default: 'general',
+    validator: (v) => ['experiment', 'general'].includes(v),
+  },
   expId: {
     type: [String, Number],
-    required: true
+    required: false
   },
   iframeData: {
     type: Object,
@@ -89,6 +95,8 @@ const props = defineProps({
     default: null
   }
 });
+
+const isExperimentMode = computed(() => props.mode === 'experiment');
 
 
 // 每次AI助手窗口打开时都上传截图
@@ -147,7 +155,8 @@ watch(() => props.modelValue, async (val) => {
 
 let title = "实验标题";
 onMounted(async () => {
-  // 获取实验信息
+  // 仅实验模式需要获取实验标题
+  if (!isExperimentMode.value) return;
   if (!props.expId) return;
   const { data } = await api.get(`/experiments/${props.expId}/info`);
   title = data.data.title;
@@ -194,29 +203,45 @@ const sendMessage = async () => {
   const userMessage = message.value.trim();
   chatHistory.value.push({ role: 'user', content: userMessage });
 
-  // 准备电路结构数据（作为结构化 JSON 发给后端，由后端组装 Prompt）
-  const compIdMapObj = (compIdMap instanceof Map) ? Object.fromEntries(compIdMap) : compIdMap;
-  const nodeKeyMapObj = (nodeKeyMap instanceof Map) ? Object.fromEntries(nodeKeyMap) : nodeKeyMap;
-
   message.value = '';
   isLoading.value = true;
 
   try {
-    const { data } = await api.post('/ai/chat', {
-      question: userMessage,
-      expTitle: title,
-      circuitData: {
-        nodes,
-        edges,
-        compIdMap: compIdMapObj,
-        nodeKeyMap: nodeKeyMapObj,
-        components,
-      },
-      history: chatHistory.value.slice(0, -1).map(m => ({
-        role: m.role,
-        content: m.content,
-      })),
-    });
+    let payload = null;
+    if (isExperimentMode.value) {
+      // 实验模式：携带电路图结构化数据（由后端组装为提示词上下文）
+      const compIdMapObj = (compIdMap instanceof Map) ? Object.fromEntries(compIdMap) : compIdMap;
+      const nodeKeyMapObj = (nodeKeyMap instanceof Map) ? Object.fromEntries(nodeKeyMap) : nodeKeyMap;
+      payload = {
+        question: userMessage,
+        expTitle: title,
+        circuitData: {
+          nodes,
+          edges,
+          compIdMap: compIdMapObj,
+          nodeKeyMap: nodeKeyMapObj,
+          components,
+        },
+        history: chatHistory.value.slice(0, -1).map(m => ({
+          role: m.role,
+          content: m.content,
+        })),
+      };
+    } else {
+      // 通用模式：不发送任何电路数据
+      payload = {
+        question: userMessage,
+        history: chatHistory.value.slice(0, -1).map(m => ({
+          role: m.role,
+          content: m.content,
+        })),
+      };
+    }
+
+    const { data } = await aiApi.post(
+      isExperimentMode.value ? '/ai/experiment-chat' : '/ai/chat',
+      payload
+    );
 
     if (data.error) {
       chatHistory.value.push({

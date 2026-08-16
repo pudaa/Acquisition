@@ -13,13 +13,25 @@ const api = axios.create({
     timeout: 10000, 
 });
 
-api.interceptors.request.use(config => {
+// AI 接口专用实例：DeepSeek 非流式响应较慢，放宽超时
+const aiApi = axios.create({
+    baseURL: API_BASE,
+    headers: {
+        'Content-Type': 'application/json'
+    },
+    timeout: 60000,
+});
+
+const attachAuth = config => {
     const token = localStorage.getItem('token');
     if (token) { 
         config.headers.Authorization = `Bearer ${token}`;
     }
     return config;
-});
+};
+
+api.interceptors.request.use(attachAuth);
+aiApi.interceptors.request.use(attachAuth);
 
 export function isAnswerEqual(ans1, ans2) {
   const toArr = v => {
@@ -43,3 +55,4 @@ export function isAnswerEqual(ans1, ans2) {
 }
 
 export default api;
+export { aiApi };

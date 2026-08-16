@@ -1,15 +1,27 @@
 import express from 'express';
 import { db } from '../config/db.js';
+import auth, { requireRole } from '../middleware/auth.js';
+
 const router = express.Router();
+
+// 数据分析接口：仅教师可访问
+router.use(auth, requireRole('teacher'));
+
+// 时间范围参数解析：仅接受 1~3650 的整数，其他一律返回 null（防注入）
+function parseTimeRange(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const n = Number(value);
+  if (!Number.isInteger(n) || n <= 0 || n > 3650) return null;
+  return n;
+}
 
 // 实验完成率分布数据（增加时间过滤）
 router.get('/completion', async (req, res) => {
     try {
-        const { time_range } = req.query;
-        const whereClause = time_range ? 
-            `WHERE ue.completion_time >= DATE_SUB(NOW(), INTERVAL ${time_range} DAY)` : 
-            '';
-        
+        const days = parseTimeRange(req.query.time_range);
+        const whereClause = days ? `WHERE ue.completion_time >= DATE_SUB(NOW(), INTERVAL ? DAY)` : '';
+        const params = days ? [days] : [];
+
         const sql = `
             SELECT e.exp_id, e.title,
             COUNT(ue.user_id) AS total_users,
@@ -19,7 +31,7 @@ router.get('/completion', async (req, res) => {
             ${whereClause}
             GROUP BY e.exp_id
         `;
-        const results = await db.query(sql);
+        const results = await db.query(sql, params);
         res.json({ data: results });
     } catch (error) {
         console.error(error);
@@ -30,16 +42,14 @@ router.get('/completion', async (req, res) => {
 // 学习进度趋势数据（动态时间范围）
 router.get('/progress-trend', async (req, res) => {
     try {
-        const { time_range } = req.query;
-        const interval = time_range ? `${time_range} DAY` : '30 DAY';
-        
+        const days = parseTimeRange(req.query.time_range) || 30;
         const sql = `
             SELECT DATE(start_time) AS date, AVG(progress) AS avg_progress
             FROM experiment_attempts
-            WHERE start_time >= DATE_SUB(NOW(), INTERVAL ${interval})
+            WHERE start_time >= DATE_SUB(NOW(), INTERVAL ? DAY)
             GROUP BY date ORDER BY date ASC
         `;
-        const results = await db.query(sql);
+        const results = await db.query(sql, [days]);
         res.json({ data: results });
     } catch (error) {
         console.error(error);
@@ -71,16 +81,17 @@ router.get('/operations', async (req, res) => {
         const { time_range, exp_id } = req.query;
         const whereConditions = [];
         const params = [];
-        
+
         if (exp_id) {
             whereConditions.push('exp_id = ?');
             params.push(exp_id);
         }
-        if (time_range) {
+        const days = parseTimeRange(time_range);
+        if (days) {
             whereConditions.push('start_time >= DATE_SUB(NOW(), INTERVAL ? DAY)');
-            params.push(time_range);
+            params.push(days);
         }
-        
+
         const whereClause = whereConditions.length > 0 
             ? `WHERE ${whereConditions.join(' AND ')}` 
             : '';

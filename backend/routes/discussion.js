@@ -38,11 +38,22 @@ router.get('/topics', auth, async (req, res) => {
 // 新建话题
 router.post('/topics', auth, async (req, res) => {
   try {
-    const { title, content, authorId, class_id } = req.body;
+    const { title, content, class_id } = req.body;
     if (!title || !content) return res.status(400).json({ error: '标题和内容不能为空' });
+    if (typeof title !== 'string' || title.length > 100) return res.status(400).json({ error: '标题长度需在 1~100 字符之间' });
+    if (typeof content !== 'string' || content.length > 5000) return res.status(400).json({ error: '内容过长（最多 5000 字）' });
+
+    // 作者取自令牌（防伪造）
+    const authorId = req.user.id;
+    // 班级归属校验：学生只能发综合区（class_id 为 null）或自己班级区
+    const targetClassId = class_id ?? null;
+    if (req.user.role !== 'teacher' && targetClassId !== null && targetClassId !== req.user.class_id) {
+      return res.status(403).json({ error: '无权在该讨论区发帖' });
+    }
+
     await db.query(
       'INSERT INTO discussion_topics (title, content, author_id, class_id) VALUES (?, ?, ?, ?)',
-      [title, content, authorId, class_id ?? null]
+      [title, content, authorId, targetClassId]
     );
     res.json({ message: '发布成功' });
   } catch (err) {
@@ -54,11 +65,13 @@ router.post('/topics', auth, async (req, res) => {
 router.post('/topics/:topicId/replies', auth, async (req, res) => {
   try {
     const { topicId } = req.params;
-    const { content, authorId } = req.body;
+    const { content } = req.body;
     if (!content) return res.status(400).json({ error: '回复内容不能为空' });
+    if (typeof content !== 'string' || content.length > 5000) return res.status(400).json({ error: '回复内容过长（最多 5000 字）' });
+    // 作者取自令牌（防伪造）
     await db.query(
       'INSERT INTO discussion_replies (topic_id, content, author_id) VALUES (?, ?, ?)',
-      [topicId, content, authorId]
+      [topicId, content, req.user.id]
     );
     res.json({ message: '回复成功' });
   } catch (err) {

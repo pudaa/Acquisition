@@ -27,7 +27,6 @@ class Database {
     // 使用连接池执行预处理语句，
     const [rows] = await this.pool.execute(sql, params);
     // 返回结果集（SELECT返回数据数组，INSERT返回操作结果对象）
-    console.log("查询结果：",rows);
     return rows;
   }
 

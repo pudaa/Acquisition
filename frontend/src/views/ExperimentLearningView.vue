@@ -85,6 +85,7 @@
 
         <AIChatWindow 
             v-model="showChatWindow" 
+            mode="experiment"
             :expId="expId"
             :iframe-data="iframeData"
             :screenshot-url="aiScreenshotUrl"

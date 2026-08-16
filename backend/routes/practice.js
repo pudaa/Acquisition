@@ -2,19 +2,27 @@ import express from 'express';
 import { calculateProbabilities, selectDifficulty, updateMasteryScore } from '../utils/practiceAlgorithm.js';
 import { db } from '../config/db.js';
 import auth from '../middleware/auth.js';
-import OpenAI from 'openai';
-
-const openai = new OpenAI({
-  baseURL: 'https://api.deepseek.com',
-  apiKey: process.env.DEEPSEEK_API_KEY || '',
-});
+import { aiClient } from '../utils/ai/client.js';
 
 const router = express.Router();
+
+// 生成 IN 子句占位符（execute 预编译下数组不能直接绑定，需展开为多个 ?）
+function buildNotIn(answeredQuestions) {
+  const ids = Array.isArray(answeredQuestions)
+    ? answeredQuestions.map(Number).filter(n => Number.isInteger(n) && n > 0)
+    : [];
+  const arr = ids.length ? [...new Set(ids)] : [0];
+  return {
+    placeholders: arr.map(() => '?').join(', '),
+    params: arr,
+  };
+}
 
 // 获取下一题
 router.post('/next-question', auth, async (req, res) => {
     try {
         const { expId, masteryScore, answeredQuestions = [] } = req.body;
+        const notIn = buildNotIn(answeredQuestions);
         
         // 计算各难度概率
         const probs = calculateProbabilities(masteryScore);
@@ -22,8 +30,8 @@ router.post('/next-question', auth, async (req, res) => {
         
         // 先获取所有可用题目
         const availableQuestions = await db.query(
-            'SELECT id FROM questions WHERE exp_id = ? AND id NOT IN (?)',
-            [expId, answeredQuestions.length ? answeredQuestions : [0]]
+            `SELECT id FROM questions WHERE exp_id = ? AND id NOT IN (${notIn.placeholders})`,
+            [expId, ...notIn.params]
         );
 
         // 如果没有可用题目，返回404
@@ -33,15 +41,15 @@ router.post('/next-question', auth, async (req, res) => {
 
         // 尝试获取指定难度的题目
         const [question] = await db.query(
-            'SELECT * FROM questions WHERE exp_id = ? AND difficulty = ? AND id NOT IN (?) ORDER BY RAND() LIMIT 1',
-            [expId, difficulty, answeredQuestions.length ? answeredQuestions : [0]]
+            `SELECT * FROM questions WHERE exp_id = ? AND difficulty = ? AND id NOT IN (${notIn.placeholders}) ORDER BY RAND() LIMIT 1`,
+            [expId, difficulty, ...notIn.params]
         );
 
         // 如果当前难度没有可用题目，随机获取其他难度的题目
         if (!question) {
             const [anyQuestion] = await db.query(
-                'SELECT * FROM questions WHERE exp_id = ? AND id NOT IN (?) ORDER BY RAND() LIMIT 1',
-                [expId, answeredQuestions.length ? answeredQuestions : [0]]
+                `SELECT * FROM questions WHERE exp_id = ? AND id NOT IN (${notIn.placeholders}) ORDER BY RAND() LIMIT 1`,
+                [expId, ...notIn.params]
             );
             res.json({ question: anyQuestion });
             return;
@@ -84,7 +92,7 @@ async function generateQuestionAnalysis(question, userAnswer, correctAnswer) {
 
 解析内容：`;
 
-        const completion = await openai.chat.completions.create({
+        const completion = await aiClient.chat.completions.create({
             model: 'deepseek-chat',
             messages: [{ role: 'user', content: prompt }],
             temperature: 0.7,
@@ -247,6 +255,10 @@ router.get('/correction-notebook/analysis/:recordId', auth, async (req, res) => 
         const [record] = await db.query('SELECT * FROM practice_records WHERE id = ?', [recordId]);
         if (!record) {
             return res.status(404).json({ error: '题目记录不存在' });
+        }
+        // 归属校验：只能查看自己的错题解析（防越权）
+        if (record.user_id !== req.user.id) {
+            return res.status(403).json({ error: '无权访问该记录' });
         }
         // 如果已有解析，直接返回
         if (record.analysis) {

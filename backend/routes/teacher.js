@@ -1,8 +1,11 @@
 import express from 'express';
 import { db } from '../config/db.js';
-import auth from '../middleware/auth.js';
+import auth, { requireRole } from '../middleware/auth.js';
 
 const router = express.Router();
+
+// 教师专属接口：全部要求教师角色
+router.use(auth, requireRole('teacher'));
 
 // 修改获取学生列表的SQL查询
 // 修改查询语句添加平均完成率计算

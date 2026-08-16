@@ -5,12 +5,18 @@ import jwt from 'jsonwebtoken';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import auth from '../middleware/auth.js';
+import { createRateLimiter } from '../middleware/rateLimit.js';
 import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+// ============ 头像上传安全配置 ============
+const MAX_AVATAR_SIZE = 5 * 1024 * 1024; // 5MB
+const ALLOWED_AVATAR_EXTS = /\.(png|jpe?g|gif|webp|bmp|ico)$/i;
 
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -18,18 +24,33 @@ const storage = multer.diskStorage({
     cb(null, dir);
   },
   filename: function (req, file, cb) {
-    cb(null, Date.now() + '-' + file.originalname);
+    // 随机文件名，杜绝路径穿越与重名覆盖
+    const ext = path.extname(file.originalname.replace(/[\\/]/g, '/').split('/').pop()).toLowerCase();
+    cb(null, crypto.randomUUID() + ext);
   }
 });
 
-const upload = multer({ storage: storage });
+const upload = multer({
+  storage: storage,
+  limits: { fileSize: MAX_AVATAR_SIZE },
+  fileFilter: (req, file, cb) => {
+    if (!ALLOWED_AVATAR_EXTS.test(file.originalname)) {
+      return cb(new Error('头像仅支持图片文件（png/jpg/gif/webp等）'));
+    }
+    cb(null, true);
+  }
+});
+
+// 登录/找回密码限流：防止暴力破解与账号枚举爆破
+const loginLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 10, keyPrefix: 'login' });
+const retrieveLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 5, keyPrefix: 'retrieve' });
 
 // ------------------------------------------------- 以下为路由函数 -------------------------------------------------
 
 const router = express.Router();
 
 // 登录路由
-router.post('/login', async (req, res) => {
+router.post('/login', loginLimiter, async (req, res) => {
   const { username, password } = req.body;
 
   try {
@@ -86,10 +107,18 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// 头像上传接口
-router.post('/upload-avatar', upload.single('avatar'), (req, res) => {
-  if (!req.file) return res.status(400).json({ error: '未上传文件' });
-  res.json({ url: '/avatars/' + req.file.filename });
+// 头像上传接口（需登录，仅图片、随机文件名）
+router.post('/upload-avatar', auth, (req, res) => {
+  upload.single('avatar')(req, res, (err) => {
+    if (err) {
+      const message = err.code === 'LIMIT_FILE_SIZE'
+        ? '头像大小超过限制（最大 5MB）'
+        : (err.message || '头像上传失败');
+      return res.status(400).json({ error: message });
+    }
+    if (!req.file) return res.status(400).json({ error: '未上传文件' });
+    res.json({ url: '/avatars/' + req.file.filename });
+  });
 });
 
 // 个人信息修改接口（支持头像、昵称、密码）
@@ -97,6 +126,20 @@ router.post('/update-profile', auth, async (req, res) => {
   try {
     const userId = req.user.id;
     const { realname, avatar, newPassword } = req.body;
+    // 输入校验
+    if (realname !== undefined) {
+      if (typeof realname !== 'string' || realname.trim().length < 1 || realname.length > 30) {
+        return res.status(400).json({ error: '姓名长度需在 1~30 字符之间' });
+      }
+    }
+    if (avatar !== undefined && (typeof avatar !== 'string' || avatar.length > 200)) {
+      return res.status(400).json({ error: '头像地址无效' });
+    }
+    if (newPassword !== undefined && newPassword !== '') {
+      if (typeof newPassword !== 'string' || newPassword.length < 6 || newPassword.length > 72) {
+        return res.status(400).json({ error: '密码长度需在 6~72 字符之间' });
+      }
+    }
     // 更新昵称和头像
     await User.updateProfile(userId, { realname, avatar });
     // 如果有新密码，更新密码
@@ -114,6 +157,20 @@ router.post('/register', async (req, res) => {
   try {
     const { username, password, realname  } = req.body;
     
+    // 服务端输入校验
+    if (!username || !password || !realname) {
+      return res.status(400).json({ error: '学号、密码、姓名均不能为空', code: 400 });
+    }
+    if (typeof password !== 'string' || password.length < 6 || password.length > 72) {
+      return res.status(400).json({ error: '密码长度需在 6~72 字符之间', code: 400 });
+    }
+    if (typeof realname !== 'string' || realname.trim().length < 1 || realname.length > 30) {
+      return res.status(400).json({ error: '姓名长度需在 1~30 字符之间', code: 400 });
+    }
+    if (typeof username !== 'string' || username.length < 3 || username.length > 30) {
+      return res.status(400).json({ error: '学号长度需在 3~30 字符之间', code: 400 });
+    }
+
     // 检查学号是否已存在（已优化错误提示）
     const existingUser = await User.findByUsername(username);
     if (existingUser) {
@@ -155,7 +212,7 @@ router.post('/register', async (req, res) => {
 });
 
 // 找回密码
-router.post('/retrieve-password', async (req, res) => {
+router.post('/retrieve-password', retrieveLimiter, async (req, res) => {
   try {
     const { studentId, realname } = req.body;
     
