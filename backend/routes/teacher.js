@@ -172,4 +172,39 @@ router.get('/students/:user_id/practice-rate', auth, async (req, res) => {
   }
 });
 
+// 按学生聚合各实验答题率（一次查询返回全部，替代前端 N 次请求）
+// 与 /practice-rate 单实验接口保持相同语义：取每道题最后一次作答并重新判定
+router.get('/students/:user_id/practice-rates', auth, async (req, res) => {
+  const userId = req.params.user_id;
+  try {
+    const records = await db.query(
+      `SELECT pr.exp_id, pr.question_id, pr.user_answer, q.correct_answers
+       FROM practice_records pr
+       JOIN questions q ON pr.question_id = q.id
+       INNER JOIN (
+         SELECT question_id, MAX(created_at) AS max_time
+         FROM practice_records
+         WHERE user_id = ?
+         GROUP BY question_id
+       ) latest
+         ON pr.question_id = latest.question_id AND pr.created_at = latest.max_time
+       WHERE pr.user_id = ?`,
+      [userId, userId]
+    );
+
+    const data = {};
+    for (const rec of records) {
+      const ua = normalizeAnswer(rec.user_answer);
+      const ca = normalizeAnswer(rec.correct_answers);
+      const isCorrect = JSON.stringify(ua.sort()) === JSON.stringify(ca.sort());
+      const entry = data[rec.exp_id] || (data[rec.exp_id] = { total: 0, correct: 0 });
+      entry.total++;
+      if (isCorrect) entry.correct++;
+    }
+    res.json({ code: 0, data });
+  } catch (e) {
+    res.status(500).json({ code: 1, error: '查询失败' });
+  }
+});
+
 export default router;

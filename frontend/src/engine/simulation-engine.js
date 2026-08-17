@@ -21,17 +21,22 @@ export class SimulationEngine {
 
     // 运行状态
     this._animId = null;
-    this._prevComponents = '';
-    this._dirty = true;                // 脏标记：电路结构变化时置 true
+    this._dirty = true;                // 脏标记：电路结构变化时置 true（显式调用 markDirty）
     this._lastSolveResult = null;      // 缓存上次求解结果
   }
 
   // 设置元件列表
   setComponents(components) {
     this.components = components;
-    this._prevComponents = JSON.stringify(components);
     this._dirty = true;
     this._lastSolveResult = null;
+  }
+
+  // 显式标记电路结构变化（元件增删/开关切换/撤销等），替代每帧 JSON.stringify 脏检查
+  markDirty() {
+    this._dirty = true;
+    this._lastSolveResult = null;
+    this.simState.lastV = {};
   }
 
   // 设置目标引擎
@@ -73,21 +78,7 @@ export class SimulationEngine {
     const steps = this.time.tick();
     const dt = this.time.getEffectiveDt();
 
-    // 检查电路结构是否变化（含开关状态等）
-    const stripped = this.components.map(c => ({
-      type: c.type, xGrid: c.xGrid, yGrid: c.yGrid,
-      x2Grid: c.x2Grid, y2Grid: c.y2Grid,
-      id: c.id, rotation: c.rotation, state: c.state,
-      value: c.value, beta: c.beta,
-    }));
-    const current = JSON.stringify(stripped);
-    if (current !== this._prevComponents) {
-      this._prevComponents = current;
-      this._dirty = true;
-      this.simState.lastV = {};
-    }
-
-    // 脏标记优化：纯阻性电路且无变化时跳过重复求解
+    // 脏标记优化：电路结构变化（markDirty）或有动态元件时才重新求解
     const hasDynamic = this._hasDynamicComponents();
     if (this._dirty || hasDynamic) {
       // 执行多个子步

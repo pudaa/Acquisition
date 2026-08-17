@@ -57,10 +57,14 @@
 </template>
 
 <script>
-import * as echarts from 'echarts';
+// 按需引入 ECharts（大幅减小包体：~1MB → ~400KB）
+import * as echarts from 'echarts/core';
+import { PieChart, LineChart } from 'echarts/charts';
+import { TooltipComponent, GridComponent } from 'echarts/components';
+import { CanvasRenderer } from 'echarts/renderers';
+echarts.use([PieChart, LineChart, TooltipComponent, GridComponent, CanvasRenderer]);
 import api from '../api';
 import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue';
-import _ from 'lodash';
 
 export default {
     setup() {
@@ -98,16 +102,17 @@ export default {
                 }
             });
         };
+        let resizeDebounce = null;
         const handleResize = () => {
-            console.log('窗口大小尝试调整');
-            Object.values(charts.value).forEach(chart => {
-                reloadData();
-                // if (chart !== null) console.log(chart.isDisposed);
-                if (chart !== null && !chart.isDisposed) {// 
-                    chart.resize();
-                    console.log('图表已调整大小');
-                }
-            });
+            // 防抖：仅调整已有图表尺寸，不重新加载数据（原实现每次 resize 都重建图表+重发请求）
+            clearTimeout(resizeDebounce);
+            resizeDebounce = setTimeout(() => {
+                Object.values(charts.value).forEach(chart => {
+                    if (chart !== null && !chart.isDisposed) {
+                        chart.resize();
+                    }
+                });
+            }, 300);
         };
         onMounted(() => {
             initCharts();
@@ -117,6 +122,7 @@ export default {
         });
         // 添加组件卸载时的清理
         onUnmounted(() => {
+            clearTimeout(resizeDebounce);
             Object.values(charts.value).forEach(chart => chart?.dispose());
             window.removeEventListener('resize', handleResize);
         });

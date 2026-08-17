@@ -1,6 +1,6 @@
 // threejs-wave-bg.js
 // three.js 点阵波浪动画封装模块
-import * as THREE from 'https://cdn.bootcdn.net/ajax/libs/three.js/0.152.2/three.module.min.js';
+import * as THREE from 'three';
 
 export function createWaveBackground(container, options = {}) {
     // 点阵横向间距（像素）
@@ -25,6 +25,8 @@ export function createWaveBackground(container, options = {}) {
     // 屏幕中心点
     let windowHalfX = window.innerWidth / 2;
     let windowHalfY = window.innerHeight / 2;
+    // 动画循环句柄（页面隐藏时可暂停）
+    let animId = null;
 
     // 顶点着色器
     const vertexShader = `
@@ -78,13 +80,15 @@ export function createWaveBackground(container, options = {}) {
         scene.background = null;
         scene.add( particles );
         renderer = new THREE.WebGLRenderer( { antialias: true, alpha: true } );
-        renderer.setPixelRatio( window.devicePixelRatio );
+        // 限制 DPR 上限 2，避免高分屏 4K 下粒子渲染开销翻倍
+        renderer.setPixelRatio( Math.min( window.devicePixelRatio, 2 ) );
         renderer.setSize( window.innerWidth, window.innerHeight );
         // 添加样式类
         renderer.domElement.classList.add('wave-bg-canvas');
         container.appendChild( renderer.domElement );
         window.addEventListener('pointermove', onPointerMove);
         window.addEventListener('resize', onWindowResize);
+        document.addEventListener('visibilitychange', onVisibilityChange);
         animate();
     }
     function onWindowResize() {
@@ -99,8 +103,16 @@ export function createWaveBackground(container, options = {}) {
         mouseX = event.clientX - windowHalfX;
         mouseY = event.clientY - windowHalfY;
     }
+    // 页面不可见时暂停动画（切后台不再消耗 CPU/GPU）
+    function onVisibilityChange() {
+        if ( document.hidden ) {
+            if ( animId ) { cancelAnimationFrame( animId ); animId = null; }
+        } else if ( !animId ) {
+            animate();
+        }
+    }
     function animate() {
-        requestAnimationFrame( animate );
+        animId = requestAnimationFrame( animate );
         render();
     }
     function render() {
@@ -132,14 +144,20 @@ export function createWaveBackground(container, options = {}) {
         scene,
         camera,
         particles,
-        // 销毁方法，移除canvas和事件监听
+        // 销毁方法，移除canvas和事件监听，释放 GPU 资源
         dispose() {
+            if (animId) { cancelAnimationFrame(animId); animId = null; }
             if (renderer && renderer.domElement && renderer.domElement.parentNode) {
                 renderer.domElement.parentNode.removeChild(renderer.domElement);
+            }
+            if (particles) {
+                particles.geometry.dispose();
+                particles.material.dispose();
             }
             renderer.dispose();
             window.removeEventListener('pointermove', onPointerMove);
             window.removeEventListener('resize', onWindowResize);
+            document.removeEventListener('visibilitychange', onVisibilityChange);
         }
     };
 }

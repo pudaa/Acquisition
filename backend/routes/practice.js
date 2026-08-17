@@ -28,30 +28,37 @@ router.post('/next-question', auth, async (req, res) => {
         const probs = calculateProbabilities(masteryScore);
         const difficulty = selectDifficulty(probs);
         
-        // 先获取所有可用题目
-        const availableQuestions = await db.query(
-            `SELECT id FROM questions WHERE exp_id = ? AND id NOT IN (${notIn.placeholders})`,
-            [expId, ...notIn.params]
-        );
-
-        // 如果没有可用题目，返回404
-        if (!availableQuestions.length) {
-            return res.status(404).json({ error: '没有更多可用的题目' });
+        // 随机取一条未答题目（COUNT + 随机 OFFSET，避免 ORDER BY RAND() 全表排序）
+        async function pickRandom(whereSql, params) {
+            const [countRow] = await db.query(
+                `SELECT COUNT(*) AS cnt FROM questions WHERE ${whereSql}`,
+                params
+            );
+            if (!countRow || countRow.cnt === 0) return null;
+            const offset = Math.floor(Math.random() * countRow.cnt);
+            const [q] = await db.query(
+                `SELECT * FROM questions WHERE ${whereSql} LIMIT 1 OFFSET ?`,
+                [...params, offset]
+            );
+            return q || null;
         }
 
         // 尝试获取指定难度的题目
-        const [question] = await db.query(
-            `SELECT * FROM questions WHERE exp_id = ? AND difficulty = ? AND id NOT IN (${notIn.placeholders}) ORDER BY RAND() LIMIT 1`,
+        let question = await pickRandom(
+            `exp_id = ? AND difficulty = ? AND id NOT IN (${notIn.placeholders})`,
             [expId, difficulty, ...notIn.params]
         );
 
         // 如果当前难度没有可用题目，随机获取其他难度的题目
         if (!question) {
-            const [anyQuestion] = await db.query(
-                `SELECT * FROM questions WHERE exp_id = ? AND id NOT IN (${notIn.placeholders}) ORDER BY RAND() LIMIT 1`,
+            question = await pickRandom(
+                `exp_id = ? AND id NOT IN (${notIn.placeholders})`,
                 [expId, ...notIn.params]
             );
-            res.json({ question: anyQuestion });
+            if (!question) {
+                return res.status(404).json({ error: '没有更多可用的题目' });
+            }
+            res.json({ question });
             return;
         }
 

@@ -76,6 +76,8 @@ router.get('/difficulty', async (req, res) => {
 });
 
 // 学生行为数据获取
+// 注意：该接口对 experiment_attempts 做 JSON_TABLE 解析，无索引可用，
+// 未指定时间范围时默认限制最近 30 天，避免全表扫描拖垮数据库
 router.get('/operations', async (req, res) => {
     try {
         const { time_range, exp_id } = req.query;
@@ -86,11 +88,9 @@ router.get('/operations', async (req, res) => {
             whereConditions.push('exp_id = ?');
             params.push(exp_id);
         }
-        const days = parseTimeRange(time_range);
-        if (days) {
-            whereConditions.push('start_time >= DATE_SUB(NOW(), INTERVAL ? DAY)');
-            params.push(days);
-        }
+        const days = parseTimeRange(time_range) || 30;
+        whereConditions.push('start_time >= DATE_SUB(NOW(), INTERVAL ? DAY)');
+        params.push(days);
 
         const whereClause = whereConditions.length > 0 
             ? `WHERE ${whereConditions.join(' AND ')}` 

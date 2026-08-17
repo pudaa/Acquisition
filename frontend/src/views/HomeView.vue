@@ -99,7 +99,6 @@ import { ref, computed,onMounted, onUnmounted, watch } from 'vue';
 import { jwtDecode } from 'jwt-decode'; 
 import { useRoute } from 'vue-router'
 import { useRouter } from 'vue-router';
-import { createWaveBackground } from '@/assets/js/threejs-wave-bg'
 import AIChatWindow from '@/components/AIChatWindow.vue';
 
 const route = useRoute()
@@ -158,14 +157,17 @@ const handleAvatarError = (e) => {
   let tokenCheckTimer = null;
   const bgContainer = ref(null)
   let waveBg = null
-  onMounted(() => {
+  onMounted(async () => {
     startTokenCheck();
-    waveBg = createWaveBackground(bgContainer.value)// 如果是直接访问主页，则显示云朵动画
+    // 动态加载 three.js 波浪背景（three 体积大，独立分包避免拖慢首屏）
+    const { createWaveBackground } = await import('@/assets/js/threejs-wave-bg');
+    waveBg = createWaveBackground(bgContainer.value)
 });
 
 onUnmounted(() => {
   clearInterval(tokenCheckTimer);
-  waveBg?.dispose?.()
+  waveBg?.dispose?.();
+  unwatch();
 });
 
 // 添加token检查方法
@@ -203,12 +205,5 @@ const startTokenCheck = () => {
 const goProfile = () => {
   router.push('/profile');
 };
-
-onUnmounted(() => {
-  clearInterval(tokenCheckTimer);
-  waveBg?.dispose?.();
-  // 停止监听
-  unwatch();
-});
 
 </script>

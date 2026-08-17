@@ -165,6 +165,10 @@ let panStartOffsetY = 0;
 let pendingRotation = 0;
 // 缓存上一次发射的电路结构 JSON（用于变化检测）
 let _prevCircuitInfoJson = '';
+// 上一次发射电路结构的时刻（节流用）
+let _lastCircuitInfoTime = 0;
+// 缓存上一次目标结果 JSON（避免 60fps 触发响应式更新）
+let _prevGoalsJson = '';
 
 // 暴露方法给父组件
 defineExpose({
@@ -320,43 +324,53 @@ function initCanvas() {
       // 追踪电压历史
       trackVoltageHistory(frame.voltages);
       draw(frame.components, frame);
-      goalResults.value = frame.goals;
-      goalProgress.value = frame.progress;
-      emit('progress-update', frame.progress);
 
-      // 发射电路结构信息（供 AI 使用，仅在变化时更新）
+      // 目标/进度仅在变化时更新响应式状态并上报（避免 60fps 触发 Vue 响应式与父组件回调）
+      const goalsJson = JSON.stringify(frame.goals);
+      if (goalsJson !== _prevGoalsJson) {
+        _prevGoalsJson = goalsJson;
+        goalResults.value = frame.goals;
+        goalProgress.value = frame.progress;
+        emit('progress-update', frame.progress);
+      }
+
+      // 发射电路结构信息（供 AI 使用）：降频到 ~4Hz，避免每帧重建拓扑
       if (frame.components && frame.components.length > 0) {
-        const info = getAllNodesAndEdges(frame.components, gridSize.value);
-        const infoJson = JSON.stringify({ nodes: info.nodes, edges: info.edges });
-        if (infoJson !== _prevCircuitInfoJson) {
-          _prevCircuitInfoJson = infoJson;
-          // 构建带引脚详情的元件列表
-          const gs = gridSize.value;
-          const componentDetails = frame.components
-            .filter(c => c.type !== 'wire')
-            .map(c => {
-              const pins = getActualPins(c, gs);
-              const pinDefs = getComponentPins(gs)[c.type] || [];
-              return {
-                id: c.id,
-                type: c.type,
-                xGrid: c.xGrid, yGrid: c.yGrid, rotation: c.rotation || 0,
-                value: c.value, state: c.state,
-                lit: c.lit,
-                pins: pins.map((p, i) => ({
-                  label: pinDefs[i]?.label || `${i + 1}`,
-                  x: Math.round(p.x), y: Math.round(p.y),
-                  voltage: simEngine?.getVoltage(`${Math.round(p.x / gs) * gs},${Math.round(p.y / gs) * gs}`) || 0,
-                })),
-              };
+        const now = performance.now();
+        if (now - _lastCircuitInfoTime > 250) {
+          _lastCircuitInfoTime = now;
+          const info = getAllNodesAndEdges(frame.components, gridSize.value);
+          const infoJson = JSON.stringify({ nodes: info.nodes, edges: info.edges });
+          if (infoJson !== _prevCircuitInfoJson) {
+            _prevCircuitInfoJson = infoJson;
+            // 构建带引脚详情的元件列表
+            const gs = gridSize.value;
+            const componentDetails = frame.components
+              .filter(c => c.type !== 'wire')
+              .map(c => {
+                const pins = getActualPins(c, gs);
+                const pinDefs = getComponentPins(gs)[c.type] || [];
+                return {
+                  id: c.id,
+                  type: c.type,
+                  xGrid: c.xGrid, yGrid: c.yGrid, rotation: c.rotation || 0,
+                  value: c.value, state: c.state,
+                  lit: c.lit,
+                  pins: pins.map((p, i) => ({
+                    label: pinDefs[i]?.label || `${i + 1}`,
+                    x: Math.round(p.x), y: Math.round(p.y),
+                    voltage: simEngine?.getVoltage(`${Math.round(p.x / gs) * gs},${Math.round(p.y / gs) * gs}`) || 0,
+                  })),
+                };
+              });
+            emit('circuit-info', {
+              nodes: info.nodes,
+              edges: info.edges,
+              compIdMap: Object.fromEntries(info.compIdMap),
+              nodeKeyMap: Object.fromEntries(info.nodeKeyMap),
+              components: componentDetails,
             });
-          emit('circuit-info', {
-            nodes: info.nodes,
-            edges: info.edges,
-            compIdMap: Object.fromEntries(info.compIdMap),
-            nodeKeyMap: Object.fromEntries(info.nodeKeyMap),
-            components: componentDetails,
-          });
+          }
         }
       }
     },
@@ -390,8 +404,9 @@ function trackVoltageHistory(voltages) {
       voltageHistory[key] = [];
     }
     voltageHistory[key].push(voltages[key]);
-    if (voltageHistory[key].length > OSC_BUFFER_SIZE) {
-      voltageHistory[key].shift();
+    // 批量裁剪：避免每帧 shift() 的 O(n) 头删开销
+    if (voltageHistory[key].length > OSC_BUFFER_SIZE * 2) {
+      voltageHistory[key].splice(0, voltageHistory[key].length - OSC_BUFFER_SIZE);
     }
   }
 }
@@ -804,6 +819,7 @@ function onCanvasClick(e) {
       if (c.type === 'switch' && c.xGrid === xGrid && c.yGrid === yGrid) {
         c.state = c.state === 'closed' ? 'open' : 'closed';
         if (goalEngine) goalEngine.fireEvent('switch:toggle', { component: c, state: c.state });
+        if (simEngine) simEngine.markDirty();
         return;
       }
     }
@@ -919,6 +935,7 @@ function onCanvasClick(e) {
         wireMouseGrid = null;
         wireBendPoints = [];
         if (goalEngine) goalEngine.fireEvent('component:add:wire', { component: wireComp });
+        if (simEngine) simEngine.markDirty();
         return;
       } else {
         // 不在引脚上 → 添加曲折点
@@ -943,6 +960,7 @@ function onCanvasClick(e) {
   newComp.id = componentRegistry.generateId(newComp.type);
   components.push(newComp);
   if (goalEngine) goalEngine.fireEvent('component:add:' + newComp.type, { component: newComp });
+  if (simEngine) simEngine.markDirty();
   tempComponent = null;
   pendingRotation = 0;
   selectedType.value = null;
@@ -1099,6 +1117,7 @@ function onKeyDown(e) {
 function undoLast() {
   const removed = components.pop();
   if (removed) componentRegistry.removeId(removed.id);
+  if (simEngine) simEngine.markDirty();
 }
 
 // ======== 电路导入/导出 ========
@@ -1196,23 +1215,24 @@ function drawOscilloscope() {
     return;
   }
 
-  // 绘制波形
+  // 绘制波形（只取最近 OSC_BUFFER_SIZE 个采样点）
   const data = voltageHistory[oscChannel.value];
   const len = data.length;
   if (len < 2) {
     oscAnimId = requestAnimationFrame(drawOscilloscope);
     return;
   }
+  const start = Math.max(0, len - OSC_BUFFER_SIZE);
 
   c.strokeStyle = '#00ff88';
   c.lineWidth = 2;
   c.beginPath();
-  for (let i = 0; i < len; i++) {
-    const x = (i / OSC_BUFFER_SIZE) * w;
+  for (let i = start; i < len; i++) {
+    const x = ((i - start) / OSC_BUFFER_SIZE) * w;
     // 电压映射：0-5V → 底部到顶部
     const yNorm = Math.max(0, Math.min(1, data[i] / 5));
     const y = h - yNorm * h;
-    if (i === 0) c.moveTo(x, y);
+    if (i === start) c.moveTo(x, y);
     else c.lineTo(x, y);
   }
   c.stroke();

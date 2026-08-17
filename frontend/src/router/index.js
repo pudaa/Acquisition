@@ -1,16 +1,6 @@
 import { createRouter, createWebHistory, createWebHashHistory  } from 'vue-router'
 import HomeView from '../views/HomeView.vue'
 import LoginView from '../views/LoginView.vue'
-import RegisterView from '../views/RegisterView.vue'
-import ExperimentTaskView from '../views/ExperimentTaskView.vue'
-import ExperimentManageView from '../views/ExperimentManageView.vue'
-import StudentsDataView from '../views/StudentsDataView.vue'
-import ExperimentSearchView from '../views/ExperimentSearchView.vue'
-import ExperimentTestView from '../components/ExperimentTest.vue'
-import ExperimentExplainView from '../views/ExperimentExplainView.vue'
-import ExperimentUploadView from '../views/ExperimentUploadView.vue'
-import ResetView from '../views/ResetView.vue'
-import ExperimentFeeling from '@/views/ExperimentFeeling.vue';
 
 const routes = [
   {
@@ -18,10 +8,10 @@ const routes = [
     name: 'home',
     component: HomeView,
     children: [
-      { path: 'experiment/tasks', component: ExperimentTaskView },
-      { path: 'experiment/manage', component: ExperimentManageView },
+      { path: 'experiment/tasks', component: () => import('../views/ExperimentTaskView.vue') },
+      { path: 'experiment/manage', component: () => import('../views/ExperimentManageView.vue') },
       { path: 'experiment/viewing', 
-        component: StudentsDataView,
+        component: () => import('../views/StudentsDataView.vue'),
         meta: { 
           requiresAuth: true,
           requiresTeacher: true 
@@ -29,15 +19,15 @@ const routes = [
       },
       { 
         path: 'experiment/upload', 
-        component: ExperimentUploadView,
+        component: () => import('../views/ExperimentUploadView.vue'),
         meta: { 
           requiresAuth: true,
           requiresTeacher: true  // 仅教师可访问
         }
       },
-      { path: 'experiment/search', component: ExperimentSearchView },
-      { path: 'experiment/test', component: ExperimentTestView },
-      { path: 'experiment/explain', component: ExperimentExplainView},
+      { path: 'experiment/search', component: () => import('../views/ExperimentSearchView.vue') },
+      { path: 'experiment/test', component: () => import('../components/ExperimentTest.vue') },
+      { path: 'experiment/explain', component: () => import('../views/ExperimentExplainView.vue')},
       { path: 'discussion', component: () => import('../views/DiscussionView.vue') },
       { path: 'profile', component: () => import('../views/ProfileView.vue') },
       { path: 'class/manage', component: () => import('../views/ClassManageView.vue') },
@@ -52,12 +42,12 @@ const routes = [
   {
     path: '/register',
     name: 'register',
-    component: RegisterView
+    component: () => import('../views/RegisterView.vue')
   },
   {
     path:'/reset',
     name:'reset',
-    component: ResetView
+    component: () => import('../views/ResetView.vue')
   },
   {
     path: '/learn',
@@ -68,7 +58,7 @@ const routes = [
   {
     path: '/experiment-feeling',
     name: 'ExperimentFeeling',
-    component: ExperimentFeeling,
+    component: () => import('../views/ExperimentFeeling.vue'),
   },
 ]
 

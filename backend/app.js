@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import compression from 'compression';
 import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
@@ -19,8 +20,10 @@ const app = express();
 
 // 中间件
 app.use(cors()); // 允许跨域
-app.use(express.json({ limit: '50mb' })); // 解析 JSON 请求体
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+app.use(compression({ threshold: 1024 })); // gzip 压缩（>1KB 响应）
+// 默认 2MB 请求体上限（save-progress 等接口在路由层单独放宽）
+app.use(express.json({ limit: '2mb' })); // 解析 JSON 请求体
+app.use(express.urlencoded({ limit: '2mb', extended: true }));
 
 // 路由
 app.use('/api/auth', authRouter);
@@ -39,11 +42,12 @@ const distDir = path.resolve(__dirname, '../frontend/dist');     // 前端构建
 const hasBuild = fs.existsSync(path.join(distDir, 'index.html'));
 
 // 1. 动态上传内容优先（构建后新上传的文件只存在于 public/，不在 dist/ 中）
-app.use(express.static(publicDir));
+//    上传文件名为 UUID/随机，重传不覆盖 → 可安全缓存 1 天
+app.use(express.static(publicDir, { maxAge: '1d' }));
 
 if (hasBuild) {
-  // 2. 前端构建产物（index.html + static/ 等）
-  app.use(express.static(distDir));
+  // 2. 前端构建产物（index.html + static/ 等，Vite 产物带内容哈希 → 可长缓存）
+  app.use(express.static(distDir, { maxAge: '7d', immutable: true }));
   // 3. SPA 回退：其余 GET 请求返回 index.html（hash 路由下主要用于根路径）
   app.use((req, res, next) => {
     if (req.method === 'GET' && !req.path.startsWith('/api')) {

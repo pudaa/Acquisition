@@ -137,7 +137,6 @@
 import { faSearch } from '@fortawesome/free-solid-svg-icons'
 import { ref, computed, onMounted } from 'vue'
 import api from '../api'
-import _ from 'lodash'
 
 export default {
   setup() {
@@ -241,17 +240,13 @@ export default {
       }
     };
 
-    const loadPracticeRatePerExp = async (student, tasks) => {
-      if (!practiceRatePerExp.value[student.user_id]) {
+    // 各实验答题率：一次聚合请求返回全部（替代原先每个实验一次请求的 N+1 模式）
+    const loadPracticeRatePerExp = async (student) => {
+      try {
+        const res = await api.get(`/teacher/students/${student.user_id}/practice-rates`);
+        practiceRatePerExp.value[student.user_id] = res.data.data || {};
+      } catch (e) {
         practiceRatePerExp.value[student.user_id] = {};
-      }
-      for (const task of tasks) {
-        try {
-          const res = await api.get(`/teacher/students/${student.user_id}/experiments/${task.id}/practice-rate`);
-          practiceRatePerExp.value[student.user_id][task.id] = res.data.data;
-        } catch (e) {
-          practiceRatePerExp.value[student.user_id][task.id] = null;
-        }
       }
     };
 
@@ -261,9 +256,12 @@ export default {
       } else {
         expandedStudent.value = student.user_id
         try {
-          const res = await api.get(`/teacher/students/${student.user_id}/experiments`)
-          studentTasks.value = res.data.data
-          await loadPracticeRatePerExp(student, studentTasks.value); 
+          // 任务列表与答题率并发加载
+          const [tasksRes] = await Promise.all([
+            api.get(`/teacher/students/${student.user_id}/experiments`),
+            loadPracticeRatePerExp(student),
+          ]);
+          studentTasks.value = tasksRes.data.data
         } catch (error) {
           console.error('获取学生实验失败:', error)
         }

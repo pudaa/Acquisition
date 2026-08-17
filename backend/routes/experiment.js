@@ -213,9 +213,12 @@ router.get('/elements', auth, async (req, res) => {
     }
 });
 
-// 获取全部实验接口
+// 获取全部实验接口（支持分页，防止全量返回）
 router.get('/all', auth, async (req, res) => {
     try {
+        const page = Math.max(Number(req.query.page) || 1, 1);
+        const pageSize = Math.min(Math.max(Number(req.query.pageSize) || 200, 1), 500);
+        const offset = (page - 1) * pageSize;
         const query = `
             SELECT 
                 e.exp_id AS id,
@@ -232,10 +235,19 @@ router.get('/all', auth, async (req, res) => {
                 ON ue.exp_id = e.exp_id 
                 AND ue.user_id = ?
             ORDER BY id DESC
+            LIMIT ? OFFSET ?
         `;
         
-        const results = await db.query(query, [req.user.id]);
-        res.json({ data: results });
+        const results = await db.query(query, [req.user.id, pageSize, offset]);
+        const [countRow] = await db.query('SELECT COUNT(*) AS total FROM experiments');
+        res.json({
+            data: results,
+            pagination: {
+                current_page: page,
+                total_pages: Math.ceil((countRow?.total || 0) / pageSize) || 1,
+                total_items: countRow?.total || 0
+            }
+        });
 
     } catch (err) {
         console.error(err);
@@ -306,35 +318,16 @@ router.post('/save-progress', auth, async (req, res) => {
             );
         }
 
-        // 更新user_experiments表（只保留最高进度和完成状态）
-        const [userExp] = await db.query(
-            'SELECT * FROM user_experiments WHERE user_id = ? AND exp_id = ?',
-            [userId, expId]
+        // 更新 user_experiments（利用 (user_id, exp_id) 唯一键 upsert，只保留最高进度和完成状态）
+        await db.query(
+            `INSERT INTO user_experiments (user_id, exp_id, progress, is_completed, last_studied)
+             VALUES (?, ?, ?, ?, NOW())
+             ON DUPLICATE KEY UPDATE
+                progress = GREATEST(user_experiments.progress, VALUES(progress)),
+                is_completed = GREATEST(user_experiments.is_completed, VALUES(is_completed)),
+                last_studied = NOW()`,
+            [userId, expId, progress, isCompleted ? 1 : 0]
         );
-        if (!userExp) {
-            await db.query(
-                `INSERT INTO user_experiments (user_id, exp_id, progress, is_completed, last_studied)
-                VALUES (?, ?, ?, ?, NOW())`,
-                [userId, expId, progress, isCompleted ? 1 : 0]
-            );
-        } else {
-            let updateFields = [];
-            let updateValues = [];
-            if (progress > userExp.progress) {
-                updateFields.push('progress = ?');
-                updateValues.push(progress);
-            }
-            if (isCompleted && !userExp.is_completed) {
-                updateFields.push('is_completed = 1');
-            }
-            if (updateFields.length > 0) {
-                updateFields.push('last_studied = NOW()');
-                await db.query(
-                    `UPDATE user_experiments SET ${updateFields.join(', ')} WHERE user_id = ? AND exp_id = ?`,
-                    [...updateValues, userId, expId]
-                );
-            }
-        }
         res.json({ message: '实验实践记录保存成功' });
     } catch (err) {
         console.error(err);
@@ -524,12 +517,20 @@ router.get('/:expId/config', auth, async (req, res) => {
                     .map(type => typeToId[type])
                     .filter(id => id != null);
 
-                // 静默同步（仅当不同时才写入）
+                // 静默同步（先对比，仅当不同时才写入，避免读接口产生写库开销）
+                const stepsJson = JSON.stringify(steps);
+                const elementJson = JSON.stringify(element);
                 try {
-                    await db.query(
-                        'UPDATE experiments SET steps = ?, element = ? WHERE exp_id = ?',
-                        [JSON.stringify(steps), JSON.stringify(element), expId]
+                    const [current] = await db.query(
+                        'SELECT steps, element FROM experiments WHERE exp_id = ?',
+                        [expId]
                     );
+                    if (current && (current.steps !== stepsJson || current.element !== elementJson)) {
+                        await db.query(
+                            'UPDATE experiments SET steps = ?, element = ? WHERE exp_id = ?',
+                            [stepsJson, elementJson, expId]
+                        );
+                    }
                 } catch (syncErr) {
                     // 同步失败不影响主流程
                     console.warn(`  [config] 同步 steps/element 失败: ${syncErr.message}`);
