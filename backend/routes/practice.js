@@ -37,8 +37,8 @@ router.post('/next-question', auth, async (req, res) => {
             if (!countRow || countRow.cnt === 0) return null;
             const offset = Math.floor(Math.random() * countRow.cnt);
             const [q] = await db.query(
-                `SELECT * FROM questions WHERE ${whereSql} LIMIT 1 OFFSET ?`,
-                [...params, offset]
+                `SELECT * FROM questions WHERE ${whereSql} LIMIT 1 OFFSET ${offset}`,
+                params
             );
             return q || null;
         }

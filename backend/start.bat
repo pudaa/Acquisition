@@ -1,4 +1,5 @@
 @echo off
+cd /d "%~dp0"
 echo 正在安装依赖...
 call npm install > nul 2>&1
 if errorlevel 1 (

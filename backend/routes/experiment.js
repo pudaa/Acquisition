@@ -87,14 +87,10 @@ router.get('/', auth, async (req, res) => {
             ORDER BY e.exp_id
         `;
 
-        // 获取分页数据
+        // 获取分页数据（LIMIT/OFFSET 为强转后的数字字面量，预处理协议不支持 LIMIT 参数化）
         const experiments = await db.query(
-            `${baseQuery} LIMIT ? OFFSET ?`,
-            [
-                userId,
-                pageSize,
-                offset
-            ]
+            `${baseQuery} LIMIT ${pageSize} OFFSET ${offset}`,
+            [userId]
         );
         // 总数查询（独立 COUNT，修正原分页总数错误）
         const [countRow] = await db.query(
@@ -235,10 +231,10 @@ router.get('/all', auth, async (req, res) => {
                 ON ue.exp_id = e.exp_id 
                 AND ue.user_id = ?
             ORDER BY id DESC
-            LIMIT ? OFFSET ?
+            LIMIT ${pageSize} OFFSET ${offset}
         `;
         
-        const results = await db.query(query, [req.user.id, pageSize, offset]);
+        const results = await db.query(query, [req.user.id]);
         const [countRow] = await db.query('SELECT COUNT(*) AS total FROM experiments');
         res.json({
             data: results,
