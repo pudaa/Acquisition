@@ -3,30 +3,24 @@
     <!-- 左侧工具栏（加大+可滚动） -->
     <div class="engine-sidebar" data-guide="sidebar">
       <div class="sidebar-header">元件</div>
-      <div class="sidebar-components">
-        <button
-          v-for="comp in availableComponents"
-          :key="comp"
-          :class="['sidebar-btn', { active: selectedType === comp }]"
-          @click="selectComponent(comp)"
-          :title="getLabel(comp)"
-          :data-guide="'component-btn'"
-          :data-type="comp"
-        >
-          <img :src="getIconUrl(comp)" class="sidebar-icon" />
-          <span class="sidebar-label">{{ getLabel(comp) }}</span>
-        </button>
+      <div class="sidebar-components-wrap">
+        <div v-if="canScrollUp" class="sidebar-scroll-hint sidebar-scroll-hint-top" aria-hidden="true">
+          <span></span>
+        </div>
+        <div ref="sidebarComponents" class="sidebar-components" @scroll="updateSidebarScrollHints">
+          <button v-for="comp in availableComponents" :key="comp" :class="['sidebar-btn', { active: selectedType === comp }]" @click="selectComponent(comp)" :title="getLabel(comp)" :data-guide="'component-btn'" :data-type="comp">
+            <img :src="getIconUrl(comp)" class="sidebar-icon" />
+            <span class="sidebar-label">{{ getLabel(comp) }}</span>
+          </button>
+        </div>
+        <div v-if="canScrollDown" class="sidebar-scroll-hint sidebar-scroll-hint-bottom" aria-hidden="true">
+          <span></span>
+        </div>
       </div>
       <div class="sidebar-divider"></div>
       <div class="sidebar-actions">
-        <button class="sidebar-btn" @click="undoLast" title="撤销" data-guide="undo">
-          <span class="sidebar-icon" style="font-size:22px;">↩</span>
-          <span class="sidebar-label">撤销</span>
-        </button>
-        <button class="sidebar-btn" @click="toggleDelete" :class="{ active: isDeleteMode }" title="删除" data-guide="delete">
-          <span class="sidebar-icon" style="font-size:22px;">🗑</span>
-          <span class="sidebar-label">删除</span>
-        </button>
+        <button class="sidebar-btn" @click="undoLast" title="撤销" data-guide="undo"><span class="sidebar-icon"><svg viewBox="0 0 1024 1024" aria-hidden="true"><path d="M530.496 371.072h-6.144V234.368c0-51.136-29.312-72.448-65.472-43.328L122.816 461.376c-36.096 28.992-36.096 76.48.128 105.472l333.504 267.648c36.16 28.992 67.968-.448 67.968-43.584v-144.256h50.496c145.856 0 257.152 62.976 325.248 184.576 13.376 22.08 27.456 17.28 27.456 0-2.944-216.576-186.368-460.16-397.12-460.16z" /></svg></span><span class="sidebar-label">撤销</span></button>
+        <button class="sidebar-btn" @click="toggleDelete" :class="{ active: isDeleteMode }" title="删除" data-guide="delete"><span class="sidebar-icon"><svg viewBox="0 0 1024 1024" aria-hidden="true"><path d="M781.28 851.36a58.56 58.56 0 0 1-58.56 58.56H301.28a58.72 58.72 0 0 1-58.56-58.56V230.4h538.56zM359.68 160h304.96v-34.56a11.84 11.84 0 0 0-12-12H371.68a11.84 11.84 0 0 0-12 12zM956.8 160H734.72v-34.56a81.76 81.76 0 0 0-81.76-81.76H371.68a82.08 82.08 0 0 0-81.76 81.76V160H67.2a35.36 35.36 0 0 0 0 70.56h105.12v620.8a128.96 128.96 0 0 0 128.96 128.96h421.44a128.96 128.96 0 0 0 128.96-128.96V230.4H956.8a35.2 35.2 0 0 0 35.2-35.2 34.56 34.56 0 0 0-35.2-35.2zM512 804.16a35.2 35.2 0 0 0 35.2-35.36V393.92a35.2 35.2 0 1 0-70.4 0V768.8a35.2 35.2 0 0 0 35.2 35.36m-164.32 0a35.36 35.36 0 0 0 35.36-35.36V393.92a35.36 35.36 0 1 0-70.56 0V768.8a36.32 36.32 0 0 0 35.2 35.36m328.64 0a35.36 35.36 0 0 0 35.2-35.36V393.92a35.36 35.36 0 1 0-70.56 0V768.8a35.36 35.36 0 0 0 35.36 35.36" /></svg></span><span class="sidebar-label">删除</span></button>
         <button class="sidebar-btn" @click="showOscilloscope = !showOscilloscope" :class="{ active: showOscilloscope }" title="示波器" data-guide="oscilloscope">
           <span class="sidebar-icon">
             <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor">
@@ -40,11 +34,21 @@
       <div class="sidebar-divider" v-if="showDebugTools"></div>
       <div class="sidebar-actions" v-if="showDebugTools">
         <button class="sidebar-btn" @click="exportCircuit" title="导出电路">
-          <span class="sidebar-icon" style="font-size:20px;">📤</span>
+          <span class="sidebar-icon">
+            <svg viewBox="0 0 1024 1024" aria-hidden="true">
+              <path d="M946.4 305c-34.1 0-61.7 28-61.7 62.6v375.8c0 34.5-27.6 62.6-61.7 62.6H206.2c-34 0-61.7-28.1-61.7-62.6V367.6c0-34.6-27.6-62.6-61.7-62.6s-61.7 28-61.7 62.6v375.8c0 103.6 83 187.9 185.1 187.9h616.9c102 0 185.1-84.3 185.1-187.9V367.6c-.1-34.6-27.7-62.6-61.8-62.6z" />
+              <path d="M298.7 305h61.7c17 0 30.8 14.1 30.8 31.3v125.3c0 17.3 13.9 31.3 30.8 31.3h185c17 0 30.9-14.1 30.9-31.3V336.3c0-17.2 13.9-31.3 30.8-31.3h61.7c17 0 21-10 9-22.1l-203-206.3c-12-12.2-31.6-12.2-43.6 0L289.7 282.9c-12 12.1-7.9 22.1 9 22.1zM422.1 555.6c-17.1 0-30.8 13.9-30.8 31.3 0 17.2 13.8 31.3 30.8 31.3h185.1c17.1 0 30.8-14.1 30.8-31.3 0-17.4-13.8-31.3-30.8-31.3H422.1z" />
+            </svg>
+          </span>
           <span class="sidebar-label">导出</span>
         </button>
         <button class="sidebar-btn" @click="importCircuit" title="导入电路">
-          <span class="sidebar-icon" style="font-size:20px;">📥</span>
+          <span class="sidebar-icon">
+            <svg viewBox="0 0 1024 1024" aria-hidden="true">
+              <path d="M946.4 305c-34.1 0-61.7 28-61.7 62.6v375.8c0 34.5-27.6 62.6-61.7 62.6H206.2c-34 0-61.7-28.1-61.7-62.6V367.6c0-34.6-27.6-62.6-61.7-62.6s-61.7 28-61.7 62.6v375.8c0 103.6 83 187.9 185.1 187.9h616.9c102 0 185.1-84.3 185.1-187.9V367.6c-.1-34.6-27.7-62.6-61.8-62.6z" />
+              <path transform="rotate(180 512 512) translate(0 270)" d="M298.7 305h61.7c17 0 30.8 14.1 30.8 31.3v125.3c0 17.3 13.9 31.3 30.8 31.3h185c17 0 30.9-14.1 30.9-31.3V336.3c0-17.2 13.9-31.3 30.8-31.3h61.7c17 0 21-10 9-22.1l-203-206.3c-12-12.2-31.6-12.2-43.6 0L289.7 282.9c-12 12.1-7.9 22.1 9 22.1zM422.1 555.6c-17.1 0-30.8 13.9-30.8 31.3 0 17.2 13.8 31.3 30.8 31.3h185.1c17.1 0 30.8-14.1 30.8-31.3 0-17.4-13.8-31.3-30.8-31.3H422.1z" />
+            </svg>
+          </span>
           <span class="sidebar-label">导入</span>
         </button>
       </div>
@@ -106,6 +110,7 @@ const emit = defineEmits(['goal-achieved', 'progress-update', 'engine-ready', 'c
 const container = ref(null);
 const canvas = ref(null);
 const oscCanvas = ref(null);
+const sidebarComponents = ref(null);
 
 // ======== 响应式状态 ========
 const gridSize = ref(40);
@@ -115,6 +120,8 @@ const goalResults = ref([]);
 const goalProgress = ref(0);
 const showOscilloscope = ref(false);
 const oscChannel = ref('');
+const canScrollUp = ref(false);
+const canScrollDown = ref(false);
 const voltageHistory = {}; // 普通对象，非 reactive（避免 Vue 追踪海量属性导致内存泄漏）
 
 // 引脚信息弹窗
@@ -244,6 +251,18 @@ const iconMap = {
 
 function getIconUrl(type) { return `/button_icons/${iconMap[type] || 'wire.png'}`; }
 function getLabel(type) { return labels[type] || type; }
+
+function updateSidebarScrollHints() {
+  const el = sidebarComponents.value;
+  if (!el) return;
+  const maxScrollTop = el.scrollHeight - el.clientHeight;
+  canScrollUp.value = el.scrollTop > 2;
+  canScrollDown.value = maxScrollTop - el.scrollTop > 2;
+}
+
+function refreshSidebarScrollHints() {
+  nextTick(updateSidebarScrollHints);
+}
 
 const snap_ = (val) => Math.round(val / gridSize.value) * gridSize.value;
 
@@ -1285,9 +1304,12 @@ watch(showOscilloscope, (val) => {
 // ======== 生命周期 ========
 onMounted(() => {
   initCanvas();
+  refreshSidebarScrollHints();
+  window.addEventListener('resize', refreshSidebarScrollHints);
 });
 
 onBeforeUnmount(() => {
+  window.removeEventListener('resize', refreshSidebarScrollHints);
   if (simEngine) simEngine.stop();
   if (resizeObserver) resizeObserver.disconnect();
   if (oscAnimId) cancelAnimationFrame(oscAnimId);
@@ -1339,16 +1361,75 @@ onBeforeUnmount(() => {
   border-bottom: 1px solid #dce1e8;
 }
 
+.sidebar-components-wrap {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  padding: 8px 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .sidebar-components {
+  min-height: 0;
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 6px 4px;
+  padding: 2px 4px;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  scrollbar-width: thin;
+  /* 元件数量较多时仍可滚动，但隐藏滚动条，避免破坏图标与按钮的视觉对齐 */
+  scrollbar-width: none;
+}
+.sidebar-components::-webkit-scrollbar {
+  display: none;
+}
+
+.sidebar-scroll-hint {
+  position: absolute;
+  left: 14px;
+  width: 66px;
+  height: 14px;
+  z-index: 2;
+  pointer-events: none;
+  display: flex;
+  justify-content: center;
+  opacity: 0.72;
+}
+
+.sidebar-scroll-hint-top {
+  top: 6px;
+}
+
+.sidebar-scroll-hint-bottom {
+  bottom: 6px;
+}
+
+.sidebar-scroll-hint span {
+  width: 48px;
+  height: 8px;
+  border: 1px dashed rgba(25, 118, 210, 0.68);
+  border-left: 0;
+  border-right: 0;
+  border-radius: 50%;
+  background: linear-gradient(to right, transparent, rgba(255, 255, 255, 0.96), transparent);
+  animation: sidebar-hint-breathe 2.2s ease-in-out infinite;
+}
+
+.sidebar-scroll-hint-top span {
+  animation-name: sidebar-hint-breathe-top;
+}
+
+@keyframes sidebar-hint-breathe {
+  0%, 100% { opacity: 0.62; transform: scaleX(0.86); }
+  50% { opacity: 1; transform: scaleX(1); }
+}
+
+@keyframes sidebar-hint-breathe-top {
+  0%, 100% { opacity: 0.62; transform: rotate(180deg) scaleX(0.86); }
+  50% { opacity: 1; transform: rotate(180deg) scaleX(1); }
 }
 
 .sidebar-btn {
@@ -1363,7 +1444,7 @@ onBeforeUnmount(() => {
   background: transparent;
   cursor: pointer;
   font-size: 11px;
-  color: #555;
+  color: #68717c;
   transition: all 0.15s;
 }
 .sidebar-btn:hover {
@@ -1389,6 +1470,13 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 
+.sidebar-icon svg {
+  width: 28px;
+  height: 28px;
+  display: block;
+  fill: currentColor;
+}
+
 .sidebar-label {
   line-height: 1.2;
   text-align: center;
@@ -1409,7 +1497,29 @@ onBeforeUnmount(() => {
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  padding: 4px 0 8px;
+  padding: 3px 0 6px;
+}
+
+/* 操作按钮与元件按钮使用相同的视觉尺度，避免 SVG 图标显得过重 */
+.sidebar-actions .sidebar-btn {
+  width: 82px;
+  padding: 5px 2px 4px;
+  gap: 2px;
+  font-size: 10px;
+}
+
+.sidebar-actions .sidebar-label {
+  font-size: 10px;
+}
+
+.sidebar-actions .sidebar-icon {
+  width: 28px;
+  height: 28px;
+}
+
+.sidebar-actions .sidebar-icon svg {
+  width: 24px;
+  height: 24px;
 }
 
 /* ---- 主区域 ---- */

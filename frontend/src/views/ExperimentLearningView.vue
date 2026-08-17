@@ -794,29 +794,29 @@ function onGuideFinished() {
   position: fixed;
   z-index: 10000;
   border-radius: 50%;
-  bottom: 40px;
-  right: -28px;
-  width: 56px;
-  height: 56px;
+    bottom: 30px;
+    right: -20px;
+    width: 40px;
+    height: 40px;
   border: none;
-  background: #66a6ff;
+    background: linear-gradient(135deg, #89f7fe 0%, #66a6ff 100%);
   box-shadow: 0 4px 12px rgba(102, 166, 255, 0.3);
   cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   transition: all 0.5s cubic-bezier(0.68, -0.55, 0.27, 1.55);
 }
 .ai-assistant::after {
+    content: "AI";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
   color: white;
   font-weight: bold;
-  font-size: 20px;
-  letter-spacing: 1px;
+    font-size: 18px;
   pointer-events: none;
 }
 .ai-assistant:hover {
   right: 0;
   transform: rotate(360deg) scale(1.1);
-  box-shadow: 0 6px 20px rgba(102, 166, 255, 0.6);
 }
 </style>
